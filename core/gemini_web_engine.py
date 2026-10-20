@@ -450,6 +450,7 @@ class GeminiWebEngine:
         article_text: str,
         custom_instruction: Optional[str] = None,
         skill_id: Optional[Union[str, Sequence[str]]] = None,
+        extended_thinking: bool = False,
     ) -> Dict[str, Any]:
         """Gửi bài báo kiểm duyệt và trích xuất kết quả chuẩn hóa (JSON + Markdown fallback)."""
         if not isinstance(article_text, str) or not article_text.strip():
@@ -466,18 +467,18 @@ class GeminiWebEngine:
         )
 
         client = await self.init_client()
-        target_model = self._resolve_target_model(client, DEFAULT_WEB_MODEL)
+        target_model = self._resolve_target_model(client, DEFAULT_WEB_MODEL) if extended_thinking else None
         try:
             response = await client.generate_content(
-                full_prompt, model=target_model, extended_thinking=True
+                full_prompt, model=target_model, extended_thinking=extended_thinking
             )
             raw_text = getattr(response, "text", "") or ""
         except (AuthError, APIError) as exc:
             LOGGER.warning("Lỗi phiên làm việc, thử khởi tạo lại client: %s", exc)
             client = await self.init_client(force_refresh=True)
-            target_model = self._resolve_target_model(client, DEFAULT_WEB_MODEL)
+            target_model = self._resolve_target_model(client, DEFAULT_WEB_MODEL) if extended_thinking else None
             response = await client.generate_content(
-                full_prompt, model=target_model, extended_thinking=True
+                full_prompt, model=target_model, extended_thinking=extended_thinking
             )
             raw_text = getattr(response, "text", "") or ""
 
@@ -558,6 +559,7 @@ class GeminiWebEngine:
         article_text: str,
         custom_instruction: Optional[str] = None,
         skill_id: Optional[Union[str, Sequence[str]]] = None,
+        extended_thinking: bool = False,
     ) -> Dict[str, Any]:
         """Wrapper dong bo an toan voi event loop cua Streamlit."""
         return self._run_async(
@@ -565,6 +567,7 @@ class GeminiWebEngine:
                 article_text=article_text,
                 custom_instruction=custom_instruction,
                 skill_id=skill_id,
+                extended_thinking=extended_thinking,
             )
         )
 

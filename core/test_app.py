@@ -1018,6 +1018,7 @@ class GeminiWebSessionUiTests(unittest.TestCase):
 
         fake_engine = mock.MagicMock()
         fake_engine.is_granted.return_value = True
+        fake_engine.build_prompt.return_value = "Mock prompt"
         fake_engine.review_article_sync.return_value = normalized
 
         with mock.patch.object(gwe, "GeminiWebEngine", return_value=fake_engine):
@@ -1046,9 +1047,10 @@ class GeminiWebSessionUiTests(unittest.TestCase):
             app.run()
 
         self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
-        self.assertNotIn("review_result", app.session_state)
-        warnings = " ".join(item.value for item in app.warning)
-        self.assertIn("Phiên Gemini Web", warnings)
+        self.assertIn("review_result", app.session_state)
+        self.assertTrue(app.session_state["review_result"].get("auth_error"))
+        errors = " ".join(item.value for item in app.error)
+        self.assertIn("liên hệ Admin", errors)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,7 @@ import html
 import io
 import os
 import re
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -44,7 +45,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from core import gemini_web_account, skills_manager
+from core import gemini_web_account, gemini_web_engine as gwe, skills_manager
 
 from core.clipboard_utils import (
     build_clipboard_payload,
@@ -561,7 +562,7 @@ def render_gemini_web_session_panel() -> None:
             )
             if st.button("🔍 Kiểm tra hiệu lực Cookie", key="btn_check_gemini_session", use_container_width=True):
                 with st.spinner("Đang kiểm tra kết nối tới Google Gemini Web..."):
-                    engine = GeminiWebEngine()
+                    engine = gwe.GeminiWebEngine()
                     is_ok, check_msg = engine.test_connection_sync()
                     if is_ok:
                         st.success(f"✅ {check_msg}")
@@ -893,6 +894,21 @@ def render_article_input() -> Tuple[str, str]:
 def render_results(options: Dict[str, Any]) -> None:
     """Hien thi ket qua kiem duyet da luu trong ``st.session_state``."""
     result: Dict[str, Any] = st.session_state[STATE_RESULT]
+    if result.get("auth_error"):
+        st.divider()
+        st.error(
+            "🛑 **KHÔNG THỂ XUẤT ĐẦU RA KIỂM DUYỆT: TÀI KHOẢN ĐÃ MẤT ĐĂNG NHẬP HOẶC HẾT HẠN!**\n\n"
+            "### 👉 Vui lòng liên hệ Admin để cấp lại tài khoản\n\n"
+            "Hệ thống đã khóa toàn bộ chức năng xuất bảng lỗi, kiểm chứng và tải báo cáo Word cho đến khi Quản trị viên (Admin) cấp lại tài khoản / cập nhật phiên đăng nhập mới."
+        )
+        with st.expander("ℹ️ Hướng dẫn dành cho Admin / Người vận hành máy chủ"):
+            st.markdown(
+                "1. Trên máy chủ, hãy click đúp vào file **`dong_bo_gemini.bat`** để mở trình duyệt đăng nhập tài khoản Google.\n"
+                "2. Tool sẽ tự động trích xuất cookie và đồng bộ ngay lên hệ thống.\n"
+                "3. Sau khi đồng bộ, người dùng có thể bấm kiểm duyệt bình thường."
+            )
+        return
+
     original_text: str = st.session_state[STATE_ORIGINAL]
     source_label: str = st.session_state.get(STATE_SOURCE, "")
     moment: datetime = st.session_state.get(STATE_MOMENT) or datetime.now()
@@ -909,6 +925,12 @@ def render_results(options: Dict[str, Any]) -> None:
         f"Đã duyệt xong bài báo ({source_label}) lúc "
         f"{moment.strftime('%H:%M:%S %d/%m/%Y')}."
     )
+
+    elapsed = st.session_state.get("review_execution_time")
+    deep_mode = st.session_state.get("review_deep_thinking")
+    if elapsed:
+        mode_label = "🧠 Duyệt chuyên sâu (Extended Thinking)" if deep_mode else "⚡ Duyệt nhanh"
+        st.caption(f"⏱️ **Thời gian xử lý:** {elapsed:.1f} giây | **Chế độ:** {mode_label}")
 
     # -- The trang thai Google Search Grounding thoi gian thuc --
     st.info(
@@ -1056,10 +1078,14 @@ def _handle_review_click_impl(
     """Nghiep vu thuc su cua ``handle_review_click`` (nguyen ban, khong doi)."""
     engine_mode = options.get("engine_mode", "api")
     if engine_mode == "api" and not options.get("api_key"):
-        st.error(
-            "Chưa có GEMINI_API_KEY. Hãy nhập key ở sidebar hoặc đặt biến môi "
-            "trường `GEMINI_API_KEY` rồi thử lại."
-        )
+        st.session_state[STATE_RESULT] = {
+            "auth_error": True,
+            "error_message": "Chưa có GEMINI_API_KEY hoặc tài khoản bị khóa.",
+        }
+        st.session_state[STATE_ORIGINAL] = article_text.strip()
+        st.session_state[STATE_SOURCE] = source_label
+        st.session_state[STATE_MOMENT] = datetime.now()
+        st.rerun()
         return
     if not article_text.strip():
         st.error("Chưa có nội dung bài báo. Hãy dán văn bản hoặc tải file lên.")
@@ -1079,7 +1105,17 @@ def _handle_review_click_impl(
     except Exception as exc:
         err_msg = str(exc)
         err_lower = err_msg.lower()
-        if any(code in err_lower for code in ("409", "429", "quota", "resource_exhausted", "conflict")):
+        if any(code in err_lower for code in ("unauthenticated", "401", "403", "api_key_invalid", "permission denied")):
+            st.session_state[STATE_RESULT] = {
+                "auth_error": True,
+                "error_message": err_msg,
+            }
+            st.session_state[STATE_ORIGINAL] = article_text.strip()
+            st.session_state[STATE_SOURCE] = source_label
+            st.session_state[STATE_MOMENT] = datetime.now()
+            st.rerun()
+            return
+        elif any(code in err_lower for code in ("409", "429", "quota", "resource_exhausted", "conflict")):
             st.session_state["api_key_exhausted"] = True
             st.error(
                 "❌ **API Key hiện tại gặp lỗi giới hạn / xung đột (409/429) sau 3 lần tự động thử lại.**\n\n"
@@ -1115,6 +1151,7 @@ def handle_review_via_gemini_web(
     article_text: str,
     source_label: str,
     skill_id: Optional[Union[str, Sequence[str]]] = None,
+    extended_thinking: bool = False,
 ) -> None:
     """TASK_10 - Kiem duyet qua **Gemini Web Session RPC** (hoan toan ngam).
 
@@ -1122,14 +1159,7 @@ def handle_review_via_gemini_web(
     1. Kiem tra phi dang nhap da duoc cap quyen (neu chua -> huong dan cap quyen).
     2. Ghep prompt bien tap vien (dung chung contract JSON voi duong Gemini API).
     3. Goi ``StreamGenerate`` qua HTTPS truc tiep bang ``gemini-webapi``.
-    4. Chu hoa ket qua va luu vao ``st.session_state`` de ve bang loi / bang
-       kiem chung / boi do / xuat Word nhu binh thuong.
-
-    KHONG mo cua so trinh duyet, KHONG bam phim, KHONG click chuot -> man hinh
-    nguoi dung khong bao gio bi giat.
-
-    Lop bao ve cuoi cung: bat cu loi nao cung chi hien ``st.error`` —
-    khong de Streamlit script crash (khet cong 8501).
+    4. Chuan hoa ket qua va luu vao ``st.session_state``.
     """
     try:
         if not article_text.strip():
@@ -1139,7 +1169,7 @@ def handle_review_via_gemini_web(
             )
             return
 
-        engine = GeminiWebEngine()
+        engine = gwe.GeminiWebEngine()
         if not engine.is_granted():
             # Tu dong luu neu nguoi dung da dan cookie vao o gw_psid o sidebar
             pending_psid = str(st.session_state.get("gw_psid") or "").strip()
@@ -1148,23 +1178,35 @@ def handle_review_via_gemini_web(
                 pending_email = str(st.session_state.get("gw_email") or "").strip()
                 pending_authuser = str(st.session_state.get("gw_authuser") or "0").strip() or "0"
                 if save_gemini_session(pending_psid, pending_psidts, pending_email, pending_authuser):
-                    engine = GeminiWebEngine()
+                    engine = gwe.GeminiWebEngine()
 
         if not engine.is_granted():
-            st.warning(
-                "🟠 **Chưa cấp quyền phiên Gemini Web.** Mở mục "
-                "**🌐 Phiên Gemini Web** ở thanh bên trái, dán cookie "
-                "`__Secure-1PSID` một lần duy nhất và bấm **💾 Lưu Cấu Hình & "
-                "Cấp Quyền Tự Động**. Sau đó app sẽ chạy ngầm vĩnh viễn."
-            )
+            st.session_state[STATE_RESULT] = {
+                "auth_error": True,
+                "error_message": "Chưa cấp quyền phiên Gemini Web.",
+            }
+            st.session_state[STATE_ORIGINAL] = article_text.strip()
+            st.session_state[STATE_SOURCE] = source_label or "Gemini Web Session"
+            st.session_state[STATE_MOMENT] = datetime.now()
+            st.rerun()
             return
 
-        with st.spinner(
-            "Đang gửi bài báo tới Gemini Web qua giao thức bảo mật và phân tích lỗi..."
-        ):
+        start_time = time.time()
+        spinner_msg = (
+            "Đang gửi bài báo tới Gemini Web (Chế độ duyệt chuyên sâu - Extended Thinking)..."
+            if extended_thinking
+            else "Đang gửi bài báo tới Gemini Web (Chế độ duyệt nhanh)..."
+        )
+        with st.spinner(spinner_msg):
             full_prompt = engine.build_prompt(article_text, skill_id=skill_id)
             st.session_state["review_sent_prompt"] = full_prompt
-            result = engine.review_article_sync(article_text, skill_id=skill_id)
+            result = engine.review_article_sync(
+                article_text, skill_id=skill_id, extended_thinking=extended_thinking
+            )
+
+        elapsed = time.time() - start_time
+        st.session_state["review_execution_time"] = elapsed
+        st.session_state["review_deep_thinking"] = extended_thinking
 
         st.session_state[STATE_RESULT] = result
         st.session_state[STATE_ORIGINAL] = article_text.strip()
@@ -1175,7 +1217,7 @@ def handle_review_via_gemini_web(
 
         st.success(
             "✅ **Đã kiểm duyệt xong qua Gemini Web Session!** "
-            "Xem bảng lỗi chính tả, bảng kiểm chứng và tab bôi đỏ bên dưới."
+            "Xem bảng lỗi chính tả và bảng kiểm chứng bên dưới."
         )
         st.rerun()
     except ValueError as exc:
@@ -1183,14 +1225,15 @@ def handle_review_via_gemini_web(
     except Exception as exc:  # noqa: BLE001 - keo cuoi chong crash server
         err_msg = str(exc)
         err_lower = err_msg.lower()
-        if any(k in err_lower for k in ("unauthenticated", "permission denied", "cookie", "auth", "hết hạn")):
-            st.error(
-                "⚠️ **CẢNH BÁO: Phiên Google Gemini Web (Cookie __Secure-1PSID / TSID) đã HẾT HẠN!**\n\n"
-                "Hệ thống không thể kết nối tới tài khoản Google để kiểm duyệt bài báo này.\n\n"
-                "👉 **Cách xử lý rất đơn giản**:\n"
-                "1. Trên máy tính chủ, hãy click đúp vào file **`dong_bo_gemini.bat`** để mở trình duyệt đăng nhập lại.\n"
-                "2. Script sẽ tự động bắt Cookie mới và đồng bộ ngay lên ứng dụng từ xa!"
-            )
+        if any(k in err_lower for k in ("unauthenticated", "permission denied", "cookie", "auth", "hết hạn", "401", "403")):
+            st.session_state[STATE_RESULT] = {
+                "auth_error": True,
+                "error_message": err_msg,
+            }
+            st.session_state[STATE_ORIGINAL] = article_text.strip()
+            st.session_state[STATE_SOURCE] = source_label or "Gemini Web Session"
+            st.session_state[STATE_MOMENT] = datetime.now()
+            st.rerun()
         else:
             st.error(f"⚠️ Sự cố khi duyệt qua Gemini Web: {exc}")
         with st.expander("Chi tiết kỹ thuật (gửi cho người vận hành)"):
@@ -1224,8 +1267,24 @@ def render_review_tab(options: Dict[str, Any]) -> None:
     copy_prompt_clicked = False
     reset_clicked = False
     web_review_clicked = False
+    is_deep_thinking = False
 
     if engine_mode == "gemini_web":
+        web_mode_choice = st.radio(
+            "⚡ **Chế độ kiểm duyệt (Gemini Web):**",
+            options=[
+                "⚡ Duyệt nhanh (Tối ưu tốc độ, phản hồi sau ~10-20 giây)",
+                "🧠 Duyệt chuyên sâu (Extended Thinking - Suy luận nhiều tầng, mất ~30-90 giây)",
+            ],
+            index=0,
+            horizontal=True,
+            help=(
+                "⚡ Duyệt nhanh: Tối ưu tốc độ phản hồi gần như tức thì, phát hiện đầy đủ lỗi chính tả và kiểm chứng nhân vật.\n"
+                "🧠 Duyệt chuyên sâu: Bật Extended Thinking để Gemini suy nghĩ sâu trước khi trả lời."
+            ),
+        )
+        is_deep_thinking = "Duyệt chuyên sâu" in web_mode_choice
+
         action_cols = st.columns([2, 2, 2])
         with action_cols[0]:
             web_review_clicked = st.button(
@@ -1279,7 +1338,7 @@ def render_review_tab(options: Dict[str, Any]) -> None:
         if not article_text.strip():
             st.warning("⚠️ Vui lòng dán văn bản hoặc tải file bài báo lên trước khi sao chép.")
         else:
-            engine = GeminiWebEngine()
+            engine = gwe.GeminiWebEngine()
             prompt_content = engine.build_prompt(
                 article_text, skill_id=selected_skill_ids
             )
@@ -1319,7 +1378,10 @@ def render_review_tab(options: Dict[str, Any]) -> None:
 
     if web_review_clicked:
         handle_review_via_gemini_web(
-            article_text, source_label, skill_id=selected_skill_ids
+            article_text,
+            source_label,
+            skill_id=selected_skill_ids,
+            extended_thinking=is_deep_thinking,
         )
 
     if review_clicked:
