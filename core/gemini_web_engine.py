@@ -50,8 +50,10 @@ from core.skills_manager import get_active_skills_prompt_sync
 
 LOGGER = logging.getLogger(__name__)
 
+BASE_DIR = Path(__file__).resolve().parent.parent
 #: File cau hinh phi dang nhap (cap quyen vinh vien).
-CONFIG_PATH = Path(r"E:\kiem duyet bao\config\gemini_session.json")
+CONFIG_PATH = BASE_DIR / "config" / "gemini_session.json"
+ENC_CONFIG_PATH = BASE_DIR / "config" / "gemini_session.enc"
 
 #: Model Gemini Web mac dinh (uu tien 3.8-flash, tu dong fallback).
 DEFAULT_WEB_MODEL = "gemini-3.8-flash"
@@ -153,7 +155,11 @@ def current_authuser() -> Optional[str]:
 def load_gemini_session(config_path: Optional[Path] = None) -> Dict[str, Any]:
     """Doc cau hinh phi dang nhap da duoc cap quyen.
 
-    Thu tu uu tien: file ``config/gemini_session.json`` -> bien moi truong.
+    Thu tu uu tien:
+    1. File config/gemini_session.json (neu co tren may local).
+    2. Streamlit Secrets (st.secrets) neu chay tren Streamlit Cloud.
+    3. File ma hoa config/gemini_session.enc (dong bo tu may local len mây).
+    4. Bien moi truong.
 
     Returns
     -------
@@ -174,7 +180,50 @@ def load_gemini_session(config_path: Optional[Path] = None) -> Dict[str, Any]:
         except (OSError, ValueError) as exc:
             LOGGER.warning("Khong doc duoc file config session: %s", exc)
 
-    # Fallback: bien moi truong.
+    # 2. Doc tu Streamlit Secrets hoac file ma hoa chi khi dung duong dan mac dinh (khong phai test override)
+    if config_path is None:
+        try:
+            import streamlit as st
+            if hasattr(st, "secrets"):
+                for psid_key in ("SECURE_1PSID", "GEMINI_1PSID", "secure_1psid"):
+                    if psid_key in st.secrets:
+                        psid_val = str(st.secrets[psid_key]).strip()
+                        if psid_val:
+                            ts_val = ""
+                            for ts_key in ("SECURE_1PSIDTS", "GEMINI_1PSIDTS", "secure_1psidts"):
+                                if ts_key in st.secrets:
+                                    ts_val = str(st.secrets[ts_key]).strip()
+                                    break
+                            email_val = str(
+                                st.secrets.get("GEMINI_ACCOUNT_EMAIL", "") or st.secrets.get("account_email", "")
+                            ).strip()
+                            authuser_val = str(
+                                st.secrets.get("GEMINI_AUTHUSER", "0") or st.secrets.get("authuser", "0")
+                            ).strip()
+                            return {
+                                "secure_1psid": psid_val,
+                                "secure_1psidts": ts_val or None,
+                                "account_email": email_val or "luuthanh.quochoi@gmail.com",
+                                "authuser": authuser_val or "0",
+                                "auto_granted": True,
+                                "updated_at": "from_secrets",
+                            }
+        except Exception:
+            pass
+
+        # 3. Doc tu file ma hoa config/gemini_session.enc
+        try:
+            from core.gemini_session_sync import load_encrypted_session
+            enc_data = load_encrypted_session(ENC_CONFIG_PATH)
+            if enc_data and enc_data.get("secure_1psid"):
+                enc_data.setdefault("authuser", "0")
+                enc_data.setdefault("account_email", "luuthanh.quochoi@gmail.com")
+                enc_data.setdefault("auto_granted", True)
+                return enc_data
+        except Exception as exc:
+            LOGGER.debug("Khong doc duoc enc session: %s", exc)
+
+    # 4. Fallback: bien moi truong.
     return {
         "secure_1psid": os.getenv("GEMINI_1PSID", "").strip() or None,
         "secure_1psidts": os.getenv("GEMINI_1PSIDTS", "").strip() or None,
@@ -192,7 +241,7 @@ def save_gemini_session(
     authuser: str = "0",
     config_path: Optional[Path] = None,
 ) -> bool:
-    """Luu cau hinh phi dang nhap (cap quyen vinh vien) vao file JSON.
+    """Luu cau hinh phi dang nhap (cap quyen vinh vien) vao file JSON va file ma hoa ENC.
 
     Sau khi luu mot lan, app chay ngam ma **khong hoi lai**.
 
@@ -214,14 +263,23 @@ def save_gemini_session(
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
+    ok = False
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
-        return True
+        ok = True
     except OSError as exc:
         LOGGER.error("Khong ghi duoc file config session %s: %s", path, exc)
-        return False
+
+    # Dong thoi tao file ma hoa config/gemini_session.enc de dong bo len Streamlit Cloud
+    try:
+        from core.gemini_session_sync import save_encrypted_session
+        save_encrypted_session(payload, ENC_CONFIG_PATH)
+    except Exception as exc:
+        LOGGER.warning("Khong tao duoc file ma hoa enc: %s", exc)
+
+    return ok
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +363,9 @@ class GeminiWebEngine:
         except AuthError as exc:
             return False, f"Lỗi xác thực Cookie: {exc}"
         except Exception as exc:  # noqa: BLE001 - bao loi cho nguoi dung
+            err_str = str(exc)
+            if any(k in err_str.lower() for k in ("unauthenticated", "permission denied", "cookie", "auth")):
+                return False, f"Phiên Cookie đã hết hiệu lực hoặc bị từ chối: {exc}"
             return False, f"Lỗi kết nối Gemini Web: {exc}"
 
     def test_connection_sync(self) -> Tuple[bool, str]:

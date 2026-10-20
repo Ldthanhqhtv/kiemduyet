@@ -70,16 +70,19 @@ Bạn mở thư mục `E:\kiem duyet bao` bằng phần mềm code (Antigravity 
   ```
 * Muốn chặn ai đó: Chỉ cần xóa mã PIN của họ đi và lưu lại file.
 
-### 2. Cài đặt API Key bí mật trên Streamlit Cloud (để cả nhóm dùng chung):
-1. Mở trang web app đang chạy trên Streamlit Cloud.
-2. Bấm vào biểu tượng **Settings ⚙️** (hoặc dấu 3 chấm `...` ở góc dưới/trên bên phải) -> Chọn **Settings**.
-3. Chọn thẻ **Secrets**, dán cấu hình:
-   ```toml
-   GEMINI_API_KEY = "AIzaSy..."
-   ```
-4. Bấm **Save**. Tất cả người dùng có mã PIN vào app sẽ được dùng key này mà không cần nhập thủ công!
+### 2. Đồng bộ phiên Gemini Web (Cookie) khi hết hạn:
+Hệ thống sử dụng **Google Gemini Web Session** (tra cứu thời gian thực, không giới hạn quota như API).
+* Mỗi khi Cookie hết hạn (App sẽ tự động hiện cảnh báo đỏ ⚠️):
+  1. Trên máy tính của bạn, chỉ cần click đúp vào file: **`dong_bo_gemini.bat`**
+  2. Một cửa sổ trình duyệt Edge sẽ mở ra. Bạn đăng nhập tài khoản Google của bạn (Google không chặn vì là người thật thao tác).
+  3. Ngay khi đăng nhập xong, script sẽ **tự động tóm 2 mã Cookie**, mã hóa an toàn và đẩy thẳng lên GitHub.
+  4. Streamlit Cloud sẽ tự động nhận phiên mới sau 30-60 giây. Mọi người dùng từ xa mở web ra là duyệt bài được ngay, không phải nhập bất kỳ mã nào!
 
-### 3. Xem nhật ký hoạt động (Logs):
+### 3. Kiểm tra hạn sử dụng của phiên Cookie:
+* Trên máy tính: Click đúp vào file **`kiem_tra_phien_gemini.bat`** để biết Cookie hiện tại còn sống hay đã hết hạn.
+* Trên App: App tự động phát hiện phiên hết hạn và cảnh báo trực tiếp trên màn hình, hoặc bạn có thể bấm nút **`🔍 Kiểm tra hiệu lực Cookie`** ở thanh bên trái.
+
+### 4. Xem nhật ký hoạt động (Logs):
 Nếu ứng dụng gặp sự cố hoặc bạn muốn xem app đang chạy ra sao:
 * Bấm vào chữ **`Manage app`** ở góc dưới cùng bên phải của trang web Streamlit Cloud.
 * Một bảng đen chứa toàn bộ nhật ký (Logs) chi tiết của hệ thống sẽ hiện ra để bạn theo dõi.

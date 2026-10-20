@@ -473,19 +473,59 @@ def skill_option_label(skill: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def check_gemini_cookie_health() -> Tuple[bool, str]:
+    """Tu dong kiem tra xem Cookie phien Gemini Web con song hay da het han."""
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return True, "Test mode"
+
+    session = load_gemini_session()
+    psid = session.get("secure_1psid")
+    if not psid:
+        return False, "Chưa cấu hình Cookie __Secure-1PSID"
+
+    cache_key = f"cookie_status_{hash(psid + str(session.get('secure_1psidts') or ''))}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+
+    try:
+        from gemini_webapi import GeminiClient
+        from gemini_webapi.constants import AccountStatus
+        import asyncio
+        import concurrent.futures
+
+        async def _check():
+            client = GeminiClient(secure_1psid=psid, secure_1psidts=session.get("secure_1psidts"))
+            await client.init(timeout=8, auto_refresh=False)
+            status = getattr(client, "account_status", None)
+            await client.close()
+            return status
+
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            status = pool.submit(asyncio.run, _check()).result(timeout=10)
+
+        if status == AccountStatus.AVAILABLE:
+            res = (True, "Phiên Gemini Web đang hoạt động tốt.")
+        elif status == AccountStatus.UNAUTHENTICATED or status == 1016:
+            res = (False, "Cookie ĐÃ HẾT HẠN (Google báo UNAUTHENTICATED).")
+        else:
+            res = (False, f"Trạng thái tài khoản không khả dụng ({status})")
+    except Exception as exc:
+        err_str = str(exc)
+        if "unauthenticated" in err_str.lower() or "auth" in err_str.lower():
+            res = (False, "Cookie ĐÃ HẾT HẠN - Vui lòng đăng nhập lại.")
+        else:
+            res = (True, f"Đang chờ kiểm tra ({exc})")
+
+    st.session_state[cache_key] = res
+    return res
+
+
 def render_gemini_web_session_panel() -> None:
     """Ve khu vuc cau hinh phien Gemini Web tren sidebar (cap quyen vinh vien).
 
     Chi can **cap quyen 1 lan duy nhat**: luu cookie ``__Secure-1PSID`` vao
     ``config/gemini_session.json`` — tu do app tu chay ngam ma khong bao gio
     hoi lai.
-
-    Tinh nang chong xung dot tai khoan:
-    - Hien thi cac tai khoan Google dang dang nhap tren Chrome (tu ``Local State``).
-    - Tu suy ra chi so multi-login ``/u/N/`` tu thu tu tai khoan de **ghim
-      dung tai khoan** (mac dinh ``0`` co the tro toi Gmail cong viec!).
-    - Tu dong lay cookie tu **dung profile da ghim** (khong phai profile vua
-      dung nhat) -> khong bao gio dung nham tai khoan.
     """
     session = load_gemini_session()
     has_psid = bool(session.get("secure_1psid"))
@@ -493,11 +533,23 @@ def render_gemini_web_session_panel() -> None:
     fully_configured = has_psid and has_psidts
     pinned_email = str(session.get("account_email") or "luuthanh.quochoi@gmail.com").strip()
 
+    # Tu dong kiem tra suc khoe phien
+    is_healthy, health_msg = (True, "")
+    if has_psid:
+        is_healthy, health_msg = check_gemini_cookie_health()
+
+    if not is_healthy and has_psid:
+        st.sidebar.error(
+            "⚠️ **CẢNH BÁO: Cookie Gemini Web ĐÃ HẾT HẠN!**\n\n"
+            f"Lý do: `{health_msg}`\n\n"
+            "👉 Hãy chạy file **`dong_bo_gemini.bat`** trên máy tính để đăng nhập lại."
+        )
+
     with st.sidebar.expander(
         "🌐 Phiên Gemini Web (Đã cấp quyền & Khóa an toàn)"
         if fully_configured
         else "🌐 Phiên Gemini Web (Bổ sung Cookie TS / Chỉnh sửa)",
-        expanded=not fully_configured,
+        expanded=(not fully_configured or not is_healthy),
     ):
         if fully_configured:
             st.success(
@@ -507,6 +559,17 @@ def render_gemini_web_session_panel() -> None:
                 f"- Multi-login: `u/{session.get('authuser', '0')}`\n\n"
                 "🔒 Cấu hình đã khóa an toàn để tránh thay đổi nhầm."
             )
+            if st.button("🔍 Kiểm tra hiệu lực Cookie", key="btn_check_gemini_session", use_container_width=True):
+                with st.spinner("Đang kiểm tra kết nối tới Google Gemini Web..."):
+                    engine = GeminiWebEngine()
+                    is_ok, check_msg = engine.test_connection_sync()
+                    if is_ok:
+                        st.success(f"✅ {check_msg}")
+                    else:
+                        st.error(
+                            f"⚠️ **CẢNH BÁO: Cookie đã HẾT HẠN!**\n\n{check_msg}\n\n"
+                            "👉 Hãy chạy file `dong_bo_gemini.bat` trên máy tính để đăng nhập lại."
+                        )
             allow_edit = st.checkbox("✏️ Mở ô chỉnh sửa Cookie", value=False, key="gw_allow_edit")
         else:
             allow_edit = True
@@ -519,6 +582,26 @@ def render_gemini_web_session_panel() -> None:
                 st.caption("Tài khoản Google đang đăng nhập trên Chrome:")
                 for profile_name, account in profiles.items():
                     st.write(f"- `{profile_name}` → `{account}`")
+
+            # Nut tu dong quet va lay cookie tu Chrome
+            if st.button("🔄 Tự động quét Cookie từ Chrome", key="btn_auto_fetch_cookies", use_container_width=True):
+                with st.spinner("Đang quét Cookie từ Chrome..."):
+                    try:
+                        cookies = gemini_web_account.capture_cookies_from_chrome(pinned_email)
+                    except Exception:
+                        cookies = {}
+                    if cookies and cookies.get("__Secure-1PSID"):
+                        authuser = gemini_web_account.resolve_authuser_index(pinned_email)
+                        save_gemini_session(
+                            cookies["__Secure-1PSID"],
+                            cookies.get("__Secure-1PSIDTS", ""),
+                            pinned_email,
+                            authuser,
+                        )
+                        st.success("✅ Đã tự động lấy thành công Cookie từ Chrome!")
+                        st.rerun()
+                    else:
+                        st.info("💡 Chrome đang khóa bảo mật hoặc chưa lưu cookie. Bạn có thể dán thủ công vào 2 ô bên dưới:")
 
             psid_input = st.text_input(
                 "__Secure-1PSID",
@@ -1217,7 +1300,18 @@ def handle_review_via_gemini_web(
     except ValueError as exc:
         st.error(str(exc))
     except Exception as exc:  # noqa: BLE001 - keo cuoi chong crash server
-        st.error(f"⚠️ Sự cố khi duyệt qua Gemini Web: {exc}")
+        err_msg = str(exc)
+        err_lower = err_msg.lower()
+        if any(k in err_lower for k in ("unauthenticated", "permission denied", "cookie", "auth", "hết hạn")):
+            st.error(
+                "⚠️ **CẢNH BÁO: Phiên Google Gemini Web (Cookie __Secure-1PSID / TSID) đã HẾT HẠN!**\n\n"
+                "Hệ thống không thể kết nối tới tài khoản Google để kiểm duyệt bài báo này.\n\n"
+                "👉 **Cách xử lý rất đơn giản**:\n"
+                "1. Trên máy tính chủ, hãy click đúp vào file **`dong_bo_gemini.bat`** để mở trình duyệt đăng nhập lại.\n"
+                "2. Script sẽ tự động bắt Cookie mới và đồng bộ ngay lên ứng dụng từ xa!"
+            )
+        else:
+            st.error(f"⚠️ Sự cố khi duyệt qua Gemini Web: {exc}")
         with st.expander("Chi tiết kỹ thuật (gửi cho người vận hành)"):
             st.code(traceback.format_exc(), language=None)
 
