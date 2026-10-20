@@ -120,7 +120,7 @@ def run_capture_and_sync() -> None:
         print("⏳ Đang lắng nghe Cookie phiên đăng nhập (tối đa 3 phút)...")
         start_time = time.time()
         while time.time() - start_time < 180:
-            cookies = browser.cookies(["https://gemini.google.com", "https://google.com"])
+            cookies = browser.cookies()
             cookie_dict = {c["name"]: c["value"] for c in cookies}
 
             if "__Secure-1PSID" in cookie_dict:
@@ -129,11 +129,12 @@ def run_capture_and_sync() -> None:
 
                 current_url = page.url
                 if "gemini.google.com" in current_url and "accounts.google.com" not in current_url:
-                    print("\n🎯 ĐÃ BẮT ĐƯỢC COOKIE TỪ TRÌNH DUYỆT!")
-                    print(f"   - __Secure-1PSID : {captured_psid[:18]}...{captured_psid[-8:]}")
-                    if captured_psidts:
-                        print(f"   - __Secure-1PSIDTS: {captured_psidts[:18]}...{captured_psidts[-8:]}")
-                    break
+                    if captured_psidts or (time.time() - start_time > 15):
+                        print("\n🎯 ĐÃ BẮT ĐƯỢC COOKIE TỪ TRÌNH DUYỆT!")
+                        print(f"   - __Secure-1PSID : {captured_psid[:18]}...{captured_psid[-8:]}")
+                        if captured_psidts:
+                            print(f"   - __Secure-1PSIDTS: {captured_psidts[:18]}...{captured_psidts[-8:]}")
+                        break
 
             time.sleep(2)
 
