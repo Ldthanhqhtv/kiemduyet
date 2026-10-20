@@ -181,7 +181,7 @@ def load_gemini_session(config_path: Optional[Path] = None) -> Dict[str, Any]:
             LOGGER.warning("Khong doc duoc file config session: %s", exc)
 
     # 2. Doc tu Streamlit Secrets hoac file ma hoa chi khi dung duong dan mac dinh (khong phai test override)
-    if config_path is None:
+    if config_path is None or Path(config_path) == CONFIG_PATH:
         try:
             import streamlit as st
             if hasattr(st, "secrets"):
@@ -291,7 +291,7 @@ class GeminiWebEngine:
     """Engine goi Gemini Web RPC ngam bang session cookies da cap quyen toan phan."""
 
     def __init__(self, config_path: Optional[Path] = None) -> None:
-        self.config_path = Path(config_path) if config_path else CONFIG_PATH
+        self.config_path: Optional[Path] = Path(config_path) if config_path else None
         self._client: Optional[GeminiClient] = None
         self._lock = asyncio.Lock()
 
