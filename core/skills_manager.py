@@ -195,15 +195,10 @@ def build_default_skills() -> List[Dict[str, Any]]:
 
 
 def _ensure_single_default(skills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Dam bao danh sach luon co dung mot ky nang ``is_default``."""
+    """Dam bao danh sach luon co it nhat mot ky nang ``is_default`` (ho tro nhieu ky nang mac dinh dong thoi)."""
     default_ids = [s["id"] for s in skills if s.get("is_default")]
     if not default_ids and skills:
         skills[0]["is_default"] = True
-    elif len(default_ids) > 1:
-        keep = default_ids[0]
-        for skill in skills:
-            if skill["id"] != keep:
-                skill["is_default"] = False
     return skills
 
 
@@ -481,9 +476,8 @@ def get_active_skills_prompt_sync(
 
     if not id_list:
         try:
-            default_rec = get_default_skill(skills_file=skills_file)
-            if default_rec and default_rec.get("id"):
-                id_list = [str(default_rec["id"])]
+            default_recs = get_default_skills(skills_file=skills_file)
+            id_list = [str(r["id"]) for r in default_recs if r.get("id")]
         except Exception:  # noqa: BLE001 - không để lỗi file kỹ năng làm hỏng prompt
             return ""
 
@@ -507,29 +501,38 @@ def get_active_skills_prompt_sync(
     return "\n\n".join(prompts)
 
 
+def get_default_skills(skills_file: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Lay danh sach tat ca cac ky nang duoc dat lam mac dinh (ho tro nhieu ky nang mac dinh).
+
+    Returns
+    -------
+    list
+        Danh sach dict ky nang mac dinh. Neu khong co thi mac dinh lay ky nang dau tien.
+    """
+    path = _resolve_file(skills_file)
+    skills = _read_skills(path)
+    if not skills:
+        skills = [_seed_record()]
+        _write_skills(skills, path)
+        return skills
+
+    defaults = [s for s in skills if s.get("is_default", False)]
+    if not defaults:
+        skills[0]["is_default"] = True
+        _write_skills(skills, path)
+        return [skills[0]]
+    return defaults
+
+
 def get_default_skill(skills_file: Optional[Path] = None) -> Dict[str, Any]:
-    """Lay ky nang duoc dat lam mac dinh.
+    """Lay ky nang dau tien duoc dat lam mac dinh (tuong thich nguoc 100%).
 
     Returns
     -------
     dict
-        Ky nang mac dinh. Neu khong co ky nang nao duoc danh dau
-        ``is_default`` thi lay ky nang dau tien; neu danh sach rong thi
-        khoi tao lai ky nang goc.
+        Ky nang mac dinh dau tien.
     """
-    path = _resolve_file(skills_file)
-    skills = _read_skills(path)
-    if not skills:  # duong dan du phong (da duoc xu ly trong _read_skills)
-        skills = [_seed_record()]
-        _write_skills(skills, path)
-
-    for record in skills:
-        if record.get("is_default", False):
-            return record
-    # Khong co ai duoc danh dau -> chot ky nang dau tien va sua lai trang thai.
-    skills[0]["is_default"] = True
-    _write_skills(skills, path)
-    return skills[0]
+    return get_default_skills(skills_file=skills_file)[0]
 
 
 def reset_to_default_skills(skills_file: Optional[Path] = None) -> List[Dict[str, Any]]:

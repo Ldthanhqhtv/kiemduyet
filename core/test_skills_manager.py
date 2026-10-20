@@ -356,6 +356,37 @@ class TestGetActiveSkillsPromptSync(SkillsManagerTestCase):
         prompt = get_active_skills_prompt_sync([], self.skills_file)
         self.assertIn("duyet-bai-bao", prompt)
 
+    def test_multi_defaults_prompt(self) -> None:
+        from core.skills_manager import get_active_skills_prompt_sync, get_default_skills
+        import json
+
+        # Tao 2 ky nang deu co is_default = True trong file
+        payload = {
+            "skills": [
+                {
+                    "id": "skill-1",
+                    "name": "Kỹ Năng 1",
+                    "instructions": "Nội dung quy tắc 1.",
+                    "is_default": True,
+                },
+                {
+                    "id": "skill-2",
+                    "name": "Kỹ Năng 2",
+                    "instructions": "Nội dung quy tắc 2.",
+                    "is_default": True,
+                },
+            ]
+        }
+        self.skills_file.parent.mkdir(parents=True, exist_ok=True)
+        self.skills_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        defaults = get_default_skills(self.skills_file)
+        self.assertEqual(len(defaults), 2)
+
+        prompt = get_active_skills_prompt_sync(None, self.skills_file)
+        self.assertIn("Kỹ Năng 1", prompt)
+        self.assertIn("Kỹ Năng 2", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

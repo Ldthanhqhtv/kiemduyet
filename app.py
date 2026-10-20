@@ -825,8 +825,8 @@ def render_skill_selector() -> List[str]:
         "(kỹ năng có ⭐ là kỹ năng mặc định):"
     )
 
-    default_skill = skills_manager.get_default_skill()
-    default_id = default_skill["id"] if default_skill else skills[0]["id"]
+    default_skills = skills_manager.get_default_skills()
+    default_ids = {s["id"] for s in default_skills}
 
     selected_ids: List[str] = []
 
@@ -834,7 +834,7 @@ def render_skill_selector() -> List[str]:
     for idx, skill in enumerate(skills):
         col = cols[idx % len(cols)]
         sid = skill["id"]
-        is_default = bool(skill.get("is_default") or sid == default_id)
+        is_default = bool(skill.get("is_default") or sid in default_ids)
         badge = " ⭐ (Mặc định)" if is_default else ""
         checked = col.checkbox(
             f"**{skill['name']}**{badge}",
@@ -845,8 +845,8 @@ def render_skill_selector() -> List[str]:
         if checked:
             selected_ids.append(sid)
 
-    if not selected_ids and default_id:
-        selected_ids = [default_id]
+    if not selected_ids and default_ids:
+        selected_ids = list(default_ids)
 
     return selected_ids
 
