@@ -14,7 +14,7 @@ echo Dang day len nhanh main cua GitHub: https://github.com/Ldthanhqhtv/kiemduye
 echo (Neu co cua so trinh duyet hoi dang nhap GitHub, ban chi can bam Authorize)
 echo.
 
-git push -u origin main
+git push -u origin main --force
 
 echo.
 echo ======================================================================

@@ -189,7 +189,7 @@ def run_capture_and_sync() -> None:
 
         print("   Đang đẩy lên GitHub (git push)...")
         res_push = subprocess.run(
-            ["git", "push", "origin", "main"],
+            ["git", "push", "origin", "main", "--force"],
             cwd=str(BASE_DIR),
             capture_output=True,
             text=True,
