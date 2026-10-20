@@ -1248,6 +1248,38 @@ class UnifiedArticleInputTests(unittest.TestCase):
 
         self.assertNotIn(STATE_RESULT, app.session_state)
 
+    def test_reset_clears_source_label_and_subsequent_paste_is_direct_text(self):
+        app = _make_app()
+        app.file_uploader[0].upload(
+            "bai-bao.docx", self._docx_bytes("Bài từ file."), DOCX_MIME
+        )
+        app.run()
+        self.assertIn("bai-bao.docx", str(app.session_state.get(STATE_INPUT_SOURCE, "")))
+
+        # Nguoi dung bam reset de xoa bai
+        app.button(key="reset_review_button").click()
+        app.run()
+
+        # Nguon phai duoc reset ve dan truc tiep
+        self.assertEqual(app.session_state.get(STATE_INPUT_SOURCE), "Văn bản dán trực tiếp")
+
+        # Nguoi dung dan bai moi vao o soan thao
+        app.text_area(key=STATE_ARTICLE_TEXT_AREA).input("Bài báo dán trực tiếp lần 2.").run()
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+        self.assertEqual(app.session_state.get(STATE_INPUT_SOURCE), "Văn bản dán trực tiếp")
+
+    def test_clear_input_button_resets_input_and_source(self):
+        app = _make_app()
+        app.text_area(key=STATE_ARTICLE_TEXT_AREA).input("Bài mẫu.").run()
+        self.assertEqual(app.text_area(key=STATE_ARTICLE_TEXT_AREA).value, "Bài mẫu.")
+
+        app.button(key="clear_input_text_button").click()
+        app.run()
+
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+        self.assertEqual(app.text_area(key=STATE_ARTICLE_TEXT_AREA).value, "")
+        self.assertEqual(app.session_state.get(STATE_INPUT_SOURCE), "Văn bản dán trực tiếp")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

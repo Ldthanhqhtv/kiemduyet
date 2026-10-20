@@ -464,6 +464,7 @@ def reset_review_state() -> None:
         STATE_RESULT,
         STATE_ORIGINAL,
         STATE_SOURCE,
+        STATE_INPUT_SOURCE,
         STATE_MOMENT,
         STATE_REVIEW_ID,
         STATE_USED_SKILL,
@@ -478,6 +479,7 @@ def reset_review_state() -> None:
     except Exception:  # noqa: BLE001 - widget da render -> xoa o lan chay sau
         pass
     st.session_state[STATE_CLEAR_INPUT_PENDING] = True
+    st.session_state[STATE_INPUT_SOURCE] = "Văn bản dán trực tiếp"
 
     # Xoa danh dau file da boc tach + lam moi khung keo-tha.
     st.session_state[STATE_LAST_PROCESSED_FILE] = ""
@@ -876,11 +878,11 @@ def render_article_input() -> Tuple[str, str]:
     uploader_version = int(st.session_state.get(STATE_UPLOADER_VERSION, 0) or 0)
     uploader_key = f"article_file_uploader_{uploader_version}"
 
-    # -- 1. Hang cong cu phia tren: nut nap bai mau -------------------------
-    top_cols = st.columns([2, 5])
+    # -- 1. Hang cong cu phia tren: nut nap bai mau va xoa trang -----------
+    top_cols = st.columns([2, 2, 5])
     with top_cols[0]:
         if st.button(
-            "📰 Nạp bài mẫu (Demo Sample)",
+            "📰 Nạp bài mẫu (Demo)",
             key="demo_sample_button",
             help="Điền sẵn một bài mẫu có lỗi chính tả và nhân vật để thử nghiệm nhanh.",
             use_container_width=True,
@@ -889,6 +891,15 @@ def render_article_input() -> Tuple[str, str]:
             st.session_state[STATE_INPUT_SOURCE] = "Bài báo mẫu (Demo)"
             st.session_state[STATE_LAST_PROCESSED_FILE] = ""
     with top_cols[1]:
+        if st.button(
+            "🗑️ Xóa bài / Làm mới",
+            key="clear_input_text_button",
+            help="Xóa sạch văn bản trong ô soạn thảo và làm mới khung kéo thả.",
+            use_container_width=True,
+        ):
+            reset_review_state()
+            st.rerun()
+    with top_cols[2]:
         st.caption(
             "👉 Kéo & thả file Word (.docx) vào khung bên dưới — hệ thống sẽ "
             "**tự động nạp toàn văn** vào ô biên tập để bạn xem/sửa rồi bấm "
@@ -918,6 +929,7 @@ def render_article_input() -> Tuple[str, str]:
                     st.session_state[STATE_ARTICLE_TEXT_AREA] = extracted_content
                     st.session_state[STATE_INPUT_SOURCE] = f"File: {uploaded_file.name}"
                     st.session_state[STATE_LAST_PROCESSED_FILE] = file_sig
+                    st.session_state["_last_extracted_content"] = extracted_content.strip()
                     st.success(
                         f"✅ Đã nạp tự động toàn văn từ file "
                         f"**{uploaded_file.name}** vào ô biên tập bên dưới!"
@@ -928,6 +940,12 @@ def render_article_input() -> Tuple[str, str]:
                     )
             except Exception as exc:  # noqa: BLE001 - hien loi ro rang, khong crash app
                 st.error(f"❌ Không thể đọc file Word: {exc}")
+    else:
+        # Neu khung upload khong co file (nguoi dung chua chon, da go bo, hoac sau reset)
+        if str(st.session_state.get(STATE_INPUT_SOURCE) or "").startswith("File:"):
+            st.session_state[STATE_INPUT_SOURCE] = "Văn bản dán trực tiếp"
+            st.session_state[STATE_LAST_PROCESSED_FILE] = ""
+            st.session_state.pop("_last_extracted_content", None)
 
     # -- 4. O van ban bien tap & kiem duyet ---------------------------------
     typed_text = st.text_area(
@@ -944,7 +962,14 @@ def render_article_input() -> Tuple[str, str]:
 
     # -- 5. Xac dinh bai bao va nhan nguon ----------------------------------
     article_text = (typed_text or "").strip()
-    source_label = st.session_state.get(STATE_INPUT_SOURCE) or "Văn bản dán trực tiếp"
+
+    if not article_text:
+        st.session_state[STATE_INPUT_SOURCE] = "Văn bản dán trực tiếp"
+        source_label = "Văn bản dán trực tiếp"
+    else:
+        if uploaded_file is None and st.session_state.get(STATE_INPUT_SOURCE) != "Bài báo mẫu (Demo)":
+            st.session_state[STATE_INPUT_SOURCE] = "Văn bản dán trực tiếp"
+        source_label = st.session_state.get(STATE_INPUT_SOURCE) or "Văn bản dán trực tiếp"
 
     if article_text:
         st.info(
@@ -1467,6 +1492,8 @@ def render_review_tab(options: Dict[str, Any]) -> None:
     # khi bam nut reset) vi Streamlit cam sua gia tri widget da ve.
     if st.session_state.pop(STATE_CLEAR_INPUT_PENDING, False):
         st.session_state[STATE_ARTICLE_TEXT_AREA] = ""
+        st.session_state[STATE_INPUT_SOURCE] = "Văn bản dán trực tiếp"
+        st.session_state[STATE_LAST_PROCESSED_FILE] = ""
 
     selected_skill_ids = render_skill_selector()
 
