@@ -122,6 +122,9 @@ STATE_SKILL_EDIT_ID = "skill_edit_id"
 STATE_FLASH = "skills_flash_message"
 # Ky nang THUC SU dung cho lan duyet da luu (khac voi ky nang dang chon tren UI).
 STATE_USED_SKILL = "review_used_skill_id"
+# Ma PIN bao mat truy cap ung dung
+VALID_PINS: set = {"2711", "2706"}
+STATE_AUTHENTICATED_PIN = "authenticated_pin"
 
 # Style cho trang xem diem khac biet (Diff) — dung inline de khong can file CSS.
 DIFF_STYLE_HTML = """
@@ -678,6 +681,14 @@ def render_sidebar() -> Dict[str, Any]:
         "Ứng dụng dùng Google Search grounding để kiểm chứng sự kiện, "
         "nhân vật và trích dẫn nguồn thật."
     )
+
+    # Nut dang xuat PIN
+    active_pin = st.session_state.get(STATE_AUTHENTICATED_PIN)
+    if active_pin in VALID_PINS:
+        st.sidebar.caption(f"🔒 Xác thực nội bộ: **PIN {active_pin}**")
+        if st.sidebar.button("🚪 Đăng xuất", key="logout_pin_button", use_container_width=True):
+            st.session_state.pop(STATE_AUTHENTICATED_PIN, None)
+            st.rerun()
 
     return {
         "api_key": resolve_api_key(typed_key),
@@ -1506,6 +1517,55 @@ def render_skills_manager_tab() -> None:
             st.rerun()
 
 
+def check_pin_gate() -> bool:
+    """Kiem tra ma PIN bao mat truoc khi cho phep truy cap ung dung.
+    
+    Tu dong bypass trong moi truong kiem thu pytest de khong pha vo test case.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("SKIP_PIN_GATE") == "1":
+        return True
+
+    authenticated = st.session_state.get(STATE_AUTHENTICATED_PIN)
+    if authenticated in VALID_PINS:
+        return True
+
+    cols = st.columns([1, 2, 1])
+    with cols[1]:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div style="text-align: center; padding: 28px 24px; border-radius: 12px; border: 1px solid #e2e8f0; background: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%); box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+                <div style="font-size: 40px; margin-bottom: 8px;">🔒</div>
+                <h2 style="margin: 0 0 6px 0; color: #1e293b; font-size: 22px;">HỆ THỐNG KIỂM DUYỆT BÁO AI</h2>
+                <p style="color: #64748b; font-size: 14px; margin: 0;">Hệ thống nội bộ — Vui lòng nhập mã PIN bảo mật để tiếp tục</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.form("pin_gate_form"):
+            pin_input = st.text_input(
+                "Mã PIN truy cập (4 chữ số):",
+                type="password",
+                max_chars=8,
+                placeholder="Nhập mã PIN của bạn...",
+                help="Mã PIN được cấp cho người dùng nội bộ để sử dụng ứng dụng.",
+            )
+            login_btn = st.form_submit_button(
+                "🔑 Đăng Nhập Hệ Thống", type="primary", use_container_width=True
+            )
+            if login_btn:
+                clean_pin = pin_input.strip()
+                if clean_pin in VALID_PINS:
+                    st.session_state[STATE_AUTHENTICATED_PIN] = clean_pin
+                    st.success("✅ Xác thực mã PIN thành công!")
+                    st.rerun()
+                else:
+                    st.error("❌ Mã PIN không chính xác. Vui lòng kiểm tra lại!")
+
+    return False
+
+
 def main() -> None:
     """Diem vao cua ung dung Streamlit."""
     st.set_page_config(
@@ -1514,6 +1574,9 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
+
+    if not check_pin_gate():
+        return
 
     st.title(f"{APP_ICON} {APP_TITLE}")
     st.caption(
