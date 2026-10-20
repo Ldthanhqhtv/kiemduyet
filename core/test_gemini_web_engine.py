@@ -308,7 +308,7 @@ class ReviewArticleTests(unittest.TestCase):
         self.assertIn("Bài báo có lỗi đạo đực.", prompt)
         self.assertIn("spelling_errors", prompt)
         self.assertIn("fact_checks", prompt)
-        self.assertIn("edited_text", prompt)
+        self.assertNotIn("edited_text", prompt)
 
     def test_citations_are_collected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

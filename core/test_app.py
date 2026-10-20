@@ -476,18 +476,9 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertTrue(any("Đã duyệt xong" in s.value for s in app.success))
         # Bang loi chinh ta + bang kiem chung phai duoc ve.
         self.assertGreaterEqual(len(app.dataframe), 2)
-        # Van ban da bien tap phai hien trong text_area.
-        edited = [
-            area
-            for area in app.text_area
-            if (area.key or "").startswith("edited_text_area")
-        ]
-        self.assertEqual(len(edited), 1)
-        self.assertIn("khai mạc", edited[0].value)
-        # Hai nut tai ve: .docx va .txt.
+        # Nut tai bao cao .docx
         download_labels = [d.label for d in app.download_button]
         self.assertTrue(any(".docx" in label for label in download_labels))
-        self.assertTrue(any(".txt" in label for label in download_labels))
 
     def test_fact_table_has_clickable_url_column(self):
         """Bang kiem chung phai co cot URL (LinkColumn) lay tu trich dan."""
@@ -509,6 +500,7 @@ class StreamlitAppTests(unittest.TestCase):
             url_frames[0].iloc[0][FACT_URL_COLUMN], "https://example.com/thong-cao"
         )
 
+    @unittest.skip("Da luoc bo theo yeu cau: chi liet ke loi, khong in lai bai moi va diff")
     def test_diff_renders_between_original_and_edited(self):
         """Tab xem diem phai hien HTML diff (co <del>/<ins>)."""
         app = AppTest.from_file(str(APP_PATH), default_timeout=120)
@@ -557,6 +549,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("Kỹ năng áp dụng", captions)
         self.assertIn("duyet-bai-bao", captions)
 
+    @unittest.skip("Da luoc bo theo yeu cau: chi liet ke loi, khong in lai bai moi")
     def test_new_review_replaces_edited_text_of_previous_article(self):
         """Hoi quy: o van ban da bien tap khong duoc giu noi dung bai cu."""
         first = dict(SAMPLE_RESULT, edited_text="NOI DUNG BAI A")
@@ -594,6 +587,7 @@ class StreamlitAppTests(unittest.TestCase):
         ]
         self.assertEqual(edited[0].value, "NOI DUNG BAI B")
 
+    @unittest.skip("Da luoc bo theo yeu cau: chi liet ke loi, khong in lai bai moi")
     def test_edited_text_from_widget_is_used_for_word_export(self):
         """Hoi quy: ban Word phai lay noi dung bien tap vien sua trong o nhap."""
         captured: Dict[str, Any] = {}
@@ -723,6 +717,7 @@ HIGHLIGHT_SAMPLE_RESULT = {
 }
 
 
+@unittest.skip("Da luoc bo theo yeu cau: chi liet ke loi, khong boi do")
 class HighlightTabTests(unittest.TestCase):
     """TASK_05: Tab 'Bài gốc bôi đỏ điểm nghi ngờ' + nut Sao chep Rich Text."""
 

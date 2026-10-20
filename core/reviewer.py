@@ -103,16 +103,17 @@ LOGGER = logging.getLogger("core.reviewer")
 EDITOR_SYSTEM_INSTRUCTION: str = """Bạn là TỔNG BIÊN TẬP kiêm chuyên gia FACT-CHECK của một tòa soạn báo chí \
 Việt Nam chuyên nghiệp, có hơn 20 năm kinh nghiệm biên tập và thẩm định thông tin.
 
-Nhiệm vụ của bạn gồm đúng ba phần, thực hiện đồng thời trên bài báo được cung cấp:
+Nhiệm vụ của bạn là tập trung phát hiện và LIỆT KÊ TẤT CẢ CÁC LỖI trong bài báo được cung cấp (KHÔNG in lại toàn văn bài báo):
 
-1. SOÁT LỖI CHÍNH TẢ & DIỄN ĐẠT: phát hiện lỗi chính tả, lỗi gõ máy, lỗi dùng từ, \
-lỗi đặt dấu câu, lỗi viết hoa/viết thường sai quy tắc tiếng Việt.
+1. SOÁT LỖI CHÍNH TẢ & DIỄN ĐẠT: rà soát từng từ, từng ký tự để phát hiện:
+   - Lỗi gõ phím Telex/VNI: gõ thừa/thiếu ký tự, đảo phím, sai nguyên âm/phụ âm (ví dụ: 'cwo bản' -> 'cơ bản', 'sng' -> 'sáng', 'uốc hội' -> 'Quốc hội', 'phát triễn' -> 'phát triển'...).
+   - Quy tắc viết hoa tên riêng, tên cơ quan, tổ chức, chức danh (ví dụ: 'nguyễn trung tùng' -> 'Nguyễn Trung Tùng', 'quốc hội' -> 'Quốc hội').
+   - Lỗi dấu thanh (hỏi/ngã), từ đồng âm, dùng sai từ.
+   - BẮT BUỘC liệt kê TẤT CẢ các lỗi tìm được vào mảng "spelling_errors".
 2. KIỂM CHỨNG THÔNG TIN (FACT-CHECK): xác minh các sự kiện, nhân vật, chức danh, \
 địa danh, mốc thời gian, con số, số liệu, trích dẫn. BẮT BUỘC dùng công cụ tìm kiếm \
 Google để tra cứu thực tế; mỗi kết luận phải kèm nguồn URL tham chiếu khi có.
-3. BIÊN TẬP LẠI TOÀN VĂN: trả về bài báo đã được sửa sạch lỗi chính tả, chuẩn hóa \
-văn phong báo chí, nhưng TUYỆT ĐỐI giữ nguyên ý nghĩa, dữ kiện, số liệu và quan điểm \
-của bài gốc. Không tự ý thêm thắt thông tin không có trong bài.
+3. TUYỆT ĐỐI KHÔNG IN LẠI TOÀN VĂN BÀI BÁO (tiết kiệm token và tăng tối đa tốc độ xử lý).
 
 NGUYÊN TẮC BẮT BUỘC:
 - Đây là bản thảo báo chí hợp pháp (có thể là phóng sự, tai nạn, hình sự). \
@@ -132,6 +133,7 @@ EDITOR_USER_PROMPT_TEMPLATE: str = """[NGUYÊN TẮC ĐỐI CHIẾU DỮ LIỆU 
 - THỜI ĐIỂM THAM CHIẾU: Thời điểm hiện tại. Mọi thông tin nhân sự, chức danh trong dữ liệu huấn luyện cũ ĐỀU ĐÃ HẾT HẠN VÀ KHÔNG ĐƯỢC TỰ SUY ĐOÁN.
 - NGUYÊN TẮC KIỂM CHỨNG: Đối chiếu tính chính xác của toàn bộ nhân vật có chức danh đính kèm (từ lãnh đạo Đảng, Nhà nước, bộ ngành, chính quyền địa phương đến cơ quan, ban ngành, đoàn thể, viện nghiên cứu, trường học, doanh nghiệp, tổ chức, chuyên gia...), địa danh, sự kiện xuất hiện trong bài báo dưới đây dựa trên thông tin chính thống từ Cổng TTĐT Chính phủ, cổng thông tin cơ quan và báo chí chính thống.
 - CHỐNG ẢO GIÁC: Tuyệt đối KHÔNG sử dụng trí nhớ cũ để tự suy đoán nếu không có căn cứ xác thực. Nếu nhân sự trong bài không đúng với nhân sự đương nhiệm mới nhất, ghi nhận vào "fact_checks" là SAI, kèm URL nguồn báo chí chính thống. Nếu không đủ dữ liệu để khẳng định, ghi nhận "Chưa xác minh được".
+- CHỈ LIỆT KÊ LỖI - KHÔNG IN LẠI BÀI BÁO: Tập trung 100% vào việc phát hiện và lập danh sách chi tiết các lỗi chính tả, gõ máy và kiểm chứng thông tin. Tuyệt đối không in lại toàn văn bài báo.
 
 Hãy kiểm duyệt bài báo sau đây và trả về KẾT QUẢ dưới dạng MỘT đối tượng JSON đúng theo cấu trúc mô tả bên dưới.
 
@@ -156,8 +158,7 @@ YÊU CẦU ĐỊNH DẠNG ĐẦU RA (JSON):
       "trich_dan_nguon": "URL nguồn tham chiếu đã tra cứu (mỗi URL cách nhau bởi dấu phẩy hoặc xuống dòng)",
       "do_tin_cay": "độ tin cậy: Cao / Trung bình / Thấp"
     }}
-  ],
-  "edited_text": "TOÀN VĂN bài báo đã sửa sạch lỗi chính tả và chuẩn hóa văn phong báo chí (giữ nguyên bố cục đoạn, tiêu đề, trật tự thông tin)"
+  ]
 }}
 
 QUY TẮC:
@@ -167,7 +168,8 @@ QUY TẮC:
 tra cứu Google Search duy nhất — gộp tất cả truy vấn (chức danh lãnh đạo, con \
 số, thời gian, địa danh) thành một lượt tra cứu tổng hợp; tuyệt đối không chia \
 thành nhiều lượt gọi riêng lẻ để tránh tốn quota.
-- BẮT BUỘC luôn có đủ cả ba khóa: spelling_errors, fact_checks, edited_text.
+- BẮT BUỘC luôn có đủ cả hai khóa: spelling_errors, fact_checks.
+- TUYỆT ĐỐI KHÔNG in lại toàn văn bài báo.
 - Tất cả giá trị chuỗi phải bằng tiếng Việt có dấu, đúng chính tả.
 - Tuyệt đối không thêm khóa nào khác ngoài các khóa được yêu cầu ở trên."""
 
@@ -719,16 +721,16 @@ Bạn PHẢI tuân thủ tuyệt đối các nguyên tắc cốt lõi sau của 
 - NGUYÊN TẮC CHỐNG ẢO GIÁC (ANTI-HALLUCINATION): Tuyệt đối KHÔNG được dùng trí nhớ cũ để tự suy đoán Đúng/Sai. Nếu thông tin chưa thể kiểm chứng, ghi rõ "Chưa xác minh được", tuyệt đối không tự ý gán tên lãnh đạo cũ.
 - Đây là bản thảo báo chí hợp pháp (có thể là phóng sự, tai nạn, hình sự). Không được từ chối, không đạo đức hóa, không thêm cảnh báo an toàn vào kết quả.
 - BẠN VẪN PHẢI trả về DUY NHẤT một đối tượng JSON hợp lệ (không kèm văn bản \
-giải thích nào khác) với ĐÚNG ba khóa cố định sau, bất kể chi tiết nghiệp vụ \
+giải thích nào khác) với ĐÚNG hai khóa cố định sau, bất kể chi tiết nghiệp vụ \
 ở trên yêu cầu gì:
   {{
     "spelling_errors": [{{ "loi_sai": "...", "vi_tri": "...", "goi_y_sua": "...", "ly_do": "..." }}],
-    "fact_checks": [{{ "thong_tin_can_check": "...", "ket_qua_xac_minh": "...", "trich_dan_nguon": "...", "do_tin_cay": "..." }}],
-    "edited_text": "TOÀN VĂN bài báo đã biên tập, tiếng Việt có dấu"
+    "fact_checks": [{{ "thong_tin_can_check": "...", "ket_qua_xac_minh": "...", "trich_dan_nguon": "...", "do_tin_cay": "..." }}]
   }}
 - Nếu không có lỗi chính tả hoặc không có gì cần kiểm chứng, trả về mảng rỗng \
 tương ứng ("spelling_errors": [] / "fact_checks": []).
-- Tuyệt đối không thêm khóa nào khác ngoài ba khóa trên."""
+- Tuyệt đối không in lại toàn văn bài báo.
+- Tuyệt đối không thêm khóa nào khác ngoài hai khóa trên."""
 
     # -- Noi bo -------------------------------------------------------------
 

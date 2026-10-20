@@ -992,119 +992,12 @@ def render_results(options: Dict[str, Any]) -> None:
         with st.expander("💬 Toàn văn phản hồi trực tiếp từ Gemini (Báo cáo đầy đủ)", expanded=False):
             st.markdown(result["raw_response_text"])
 
-    # -- Van ban da bien tập + xem diem --------------------------------------
-    st.subheader("📝 Toàn văn bài báo đã biên tập")
-    # Key cua o nhap gan voi ma tung lan duyet: bai moi -> o nhap moi, tranh
-    # hien lai noi dung cua bai truoc, nhung van giu phan sua tay trong cung bai.
-    review_id = st.session_state.get(STATE_REVIEW_ID) or "mac_dinh"
-    edit_key = f"edited_text_area_{review_id}"
-
-    # -- Ban thao goc boi do diem nghi ngo (TASK_05, uu tien) -----------------
-    highlight = highlight_original_article(original_text, spelling_errors, fact_checks)
-
-    tab_highlight, tab_edit, tab_diff = st.tabs(
-        [
-            "🔴 Bài gốc bôi đỏ điểm nghi ngờ",
-            "✏️ Bản đã biên tập",
-            "🔍 Xem điểm khác biệt",
-        ]
-    )
-
-    with tab_highlight:
-        if highlight["error_count"]:
-            st.info(
-                f"🔴 **Đã đánh dấu {highlight['error_count']} điểm nghi ngờ sai "
-                f"trên bản thảo gốc** — toàn văn, bố cục và xuống dòng được giữ "
-                f"nguyên 100%."
-            )
-        else:
-            st.success(
-                "✅ Không phát hiện điểm nghi ngờ sai nào — bản thảo gốc được "
-                "giữ nguyên vẹn."
-            )
-
-        copy_cols = st.columns([2, 3])
-        copy_clicked = copy_cols[0].button(
-            "📋 Sao chép bài báo bôi đỏ (Dán vào Word / CMS)",
-            key="copy_highlight_button",
-            disabled=not highlight["error_count"],
-            use_container_width=True,
-            help=(
-                "Ghi Rich Text (chữ lỗi màu đỏ, đậm, gach dưới) vào clipboard. "
-                "Mở Microsoft Word hoặc CMS VOV2 và bấm Ctrl + V để dán toàn "
-                "văn bài báo gốc kèm các điểm đã bôi đỏ."
-            ),
-        )
-        copy_cols[1].caption(
-            "Sau khi bấm sao chép, mở Word / CMS VOV2 và dán bằng **Ctrl + V** — "
-            "các điểm nghi ngờ sai sẽ hiện màu đỏ, đậm, gach dưới ngay."
-        )
-
-        if copy_clicked:
-            payload = build_clipboard_payload(highlight)
-            if write_clipboard_windows(payload["html"], payload["text"]):
-                st.success(
-                    "✅ Đã sao chép bài báo bôi đỏ vào clipboard! Hãy mở "
-                    "Microsoft Word hoặc CMS VOV2 và bấm **Ctrl + V** để dán."
-                )
-            else:
-                st.error(
-                    "Không ghi được clipboard trên máy này. Hãy copy thủ công "
-                    "phần bản thảo bên dưới (rich text vẫn hiển thị đúng màu đỏ)."
-                )
-
-        # Hien thi ban thao goc day du, giu nguyen bo cuc xuong dong.
-        st.markdown(
-            '<div style="line-height: 1.9; word-wrap: break-word; '
-            'border: 1px solid #e5e7eb; border-radius: 8px; padding: 1.2rem; '
-            'background: #ffffff;">'
-            + (highlight["html"] or "<em>(Bài báo trống)</em>")
-            + "</div>",
-            unsafe_allow_html=True,
-        )
-
-        with st.expander("📄 Xem bản text thuần kèm ghi chú lỗi"):
-            st.text_area(
-                "Bản text thuần (kèm ghi chú [NGHI VẤN: ...]) — copy tay nếu máy "
-                "không hỗ trợ clipboard rich text",
-                value=highlight["plain_text"],
-                height=260,
-                key=f"highlight_plain_text_{review_id}",
-            )
-
-    edited_value = ""
-    with tab_edit:
-        if edited_text:
-            edited_value = st.text_area(
-                "Bản đã sửa sạch lỗi chính tả và chuẩn hóa văn phong "
-                "(sửa trực tiếp được — bản Word tải về sẽ dùng đúng nội dung này)",
-                value=edited_text,
-                height=360,
-                key=edit_key,
-            )
-            st.caption(
-                f"📊 Độ dài bản biên tập: **{format_word_char_caption(edited_value)}**"
-            )
-        else:
-            st.info("Model không trả về phần văn bản đã biên tập.")
-
-    with tab_diff:
-        st.caption(
-            "🔴 Từ bị xóa (bản gốc) — 🟢 Từ được thêm/đổi (bản biên tập)."
-        )
-        st.markdown(DIFF_STYLE_HTML, unsafe_allow_html=True)
-        st.markdown(
-            build_diff_html(original_text, edited_value or edited_text),
-            unsafe_allow_html=True,
-        )
-
-    # -- Tai file Word + tai ban .txt ----------------------------------------
-    st.subheader("⬇️ Tải báo cáo")
-    export_result = merge_edited_text(result, edited_value)
+    # -- Tai file Word bao cao kiem duyet ------------------------------------
+    st.subheader("⬇️ Tải báo cáo kiểm duyệt")
     try:
         docx_bytes = export_review_to_bytes(
             original_text,
-            export_result,
+            result,
             newspaper_name=options["newspaper_name"],
             editor_name=options["editor_name"],
             include_grounding_appendix=True,
@@ -1115,31 +1008,19 @@ def render_results(options: Dict[str, Any]) -> None:
 
     stamp = moment.strftime("%Y%m%d_%H%M%S")
     docx_name = f"bao_cao_kiem_duyet_{stamp}.docx"
-    txt_name = f"bien_tap_{stamp}.txt"
-    txt_content = (
-        export_result.get("edited_text") or edited_text or original_text
-    )
 
-    download_cols = st.columns([1, 1, 2])
+    download_cols = st.columns([1, 2])
     download_cols[0].download_button(
-        "📄 Tải báo cáo (.docx)",
+        "📄 Tải báo cáo kiểm duyệt (.docx)",
         data=docx_bytes,
         file_name=docx_name,
         mime=DOCX_MIME,
         type="primary",
         width="stretch",
     )
-    download_cols[1].download_button(
-        "📝 Tải bản đã biên tập (.txt)",
-        data=txt_content.encode("utf-8"),
-        file_name=txt_name,
-        mime=TXT_MIME,
-        width="stretch",
-    )
-    download_cols[2].caption(
-        "Báo cáo Word gồm: bảng lỗi chính tả, bảng kiểm chứng kèm URL, phụ lục "
-        "nguồn Google Search và toàn văn đã biên tập. File .txt chỉ gồm phần "
-        "văn bản đã sửa để dán nhanh trở lại CMS."
+    download_cols[1].caption(
+        "Báo cáo Word chuẩn tòa soạn gồm: Bảng thống kê chi tiết lỗi chính tả (Lỗi sai, vị trí, gợi ý sửa, căn cứ), "
+        "Bảng kiểm chứng nhân vật & sự kiện (kèm đường dẫn URL xác thực), và Phụ lục nguồn Google Search thời gian thực."
     )
 
 

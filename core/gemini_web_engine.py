@@ -410,9 +410,9 @@ class GeminiWebEngine:
         # 4. Chỉ dẫn nghiệp vụ bắt buộc: rà soát từng từ, bắt lỗi viết thường và gõ sai
         strict_rules = (
             "[CHỈ DẪN NGHIỆP VỤ BẮT BUỘC - SOÁT LỖI & KIỂM CHỨNG]:\n"
-            "1. SOÁT LỖI CHÍNH TẢ & QUY TẮC VIẾT HOA TIẾNG VIỆT:\n"
-            "   - Rà soát từng từ, từng câu để phát hiện lỗi gõ máy, mất chữ, thiếu ký tự "
-            "(Ví dụ: 'uốc hội' thiếu chữ 'Q' -> Bắt buộc sửa thành 'Quốc hội').\n"
+            "1. SOÁT LỖI CHÍNH TẢ, GÕ MÁY & QUY TẮC VIẾT HOA TIẾNG VIỆT:\n"
+            "   - Rà soát từng từ, từng câu để phát hiện lỗi gõ máy, mất chữ, thiếu ký tự, lỗi đảo phím Telex/VNI "
+            "(Ví dụ: 'cwo bản' gõ nhầm Telex -> Bắt buộc sửa thành 'cơ bản'; 'sng' -> 'sáng'; 'uốc hội' thiếu chữ 'Q' -> 'Quốc hội').\n"
             "   - Kiểm tra nghiêm ngặt quy tắc viết hoa danh từ riêng, tên người, tên cơ quan: "
             "(Ví dụ: 'nguyễn trung tùng' viết thường là sai -> Bắt buộc sửa thành 'Nguyễn Trung Tùng'; "
             "'quốc hội' phải viết hoa là 'Quốc hội').\n"
@@ -428,7 +428,9 @@ class GeminiWebEngine:
             "   - Nếu chức danh/nhân sự đúng với thực tế hiện nay, xác nhận ĐÚNG kèm thông tin "
             "chức vụ thực tế và đường dẫn tham chiếu. Tránh nghi ngờ vô căn cứ đối với nhân vật và chức danh có thật.\n"
             "   - Nếu chức danh sai, lỗi thời, gán ghép nhầm hoặc nhân vật không giữ vị trí nêu trên, "
-            "BẮT BUỘC cảnh báo sai lệch và hướng dẫn sửa chuẩn."
+            "BẮT BUỘC cảnh báo sai lệch và hướng dẫn sửa chuẩn.\n\n"
+            "3. TUYỆT ĐỐI KHÔNG IN LẠI TOÀN VĂN BÀI BÁO: Chỉ tập trung phát hiện lỗi và trả về đúng đối tượng JSON "
+            "gồm spelling_errors và fact_checks (không tạo lại toàn văn bài báo để tiết kiệm token và tăng tối đa tốc độ)."
         )
 
         # 5. Bài báo & JSON schema
@@ -465,7 +467,7 @@ class GeminiWebEngine:
         target_model = self._resolve_target_model(client, DEFAULT_WEB_MODEL)
         try:
             response = await client.generate_content(
-                full_prompt, model=target_model, extended_thinking=True
+                full_prompt, model=target_model, extended_thinking=False
             )
             raw_text = getattr(response, "text", "") or ""
         except (AuthError, APIError) as exc:
@@ -473,7 +475,7 @@ class GeminiWebEngine:
             client = await self.init_client(force_refresh=True)
             target_model = self._resolve_target_model(client, DEFAULT_WEB_MODEL)
             response = await client.generate_content(
-                full_prompt, model=target_model, extended_thinking=True
+                full_prompt, model=target_model, extended_thinking=False
             )
             raw_text = getattr(response, "text", "") or ""
 

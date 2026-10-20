@@ -315,10 +315,10 @@ class TestBuildSystemInstruction(unittest.TestCase):
         merged = self.reviewer_obj.build_system_instruction(custom)
 
         self.assertTrue(merged.startswith(custom))
-        # Rang buoc JSON phia duoi voi 3 khoa co dinh.
+        # Rang buoc JSON phia duoi voi 2 khoa co dinh (khong in lai bai bao de toi uu toc do).
         self.assertIn("spelling_errors", merged)
         self.assertIn("fact_checks", merged)
-        self.assertIn("edited_text", merged)
+        self.assertNotIn("edited_text", merged)
         # Van bat buoc dung Google Search.
         self.assertIn("Google Search", merged)
         # Khong duoc ra chuoi rong.
