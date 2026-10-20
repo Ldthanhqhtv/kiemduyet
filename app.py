@@ -117,6 +117,15 @@ STATE_REVIEW_ID = "review_id"
 STATE_CLEAR_INPUT_PENDING = "clear_input_pending"
 # Key cua widget o nhap van ban bai bao (co dinh de quan ly gia tri).
 STATE_ARTICLE_TEXT_AREA = "article_text_area"
+# TASK_V2.2: quan ly phien ban cua widget file uploader de reset sach se khung
+# keo-tha khi bam "Bat dau bai moi" (doi key -> Streamlit tao widget moi rong).
+STATE_UPLOADER_VERSION = "uploader_version"
+# Chu ky danh file vua duoc boc tach (tranh boc tach lai moi lan chay lai).
+STATE_LAST_PROCESSED_FILE = "last_processed_file_signature"
+# Nhan nguon cua O NHAP (file nao / dan tay) — TACH rieng khoa nhan nguon cua
+# KET QUA (``STATE_SOURCE``) de viec sua van ban khong lam doi nhan nguon bai
+# da duyet truoc do.
+STATE_INPUT_SOURCE = "input_source_label"
 # Khoa luu id ky nang dang sua trong tab quan ly ky nang (None = them moi).
 STATE_SKILL_EDIT_ID = "skill_edit_id"
 # Thong bao "flash" hien thi mot lan o dau tab quan ly (truoc khi rerun).
@@ -445,7 +454,12 @@ def merge_edited_text(
 
 
 def reset_review_state() -> None:
-    """Xoa toan bo ket qua kiem duyet da luu (khoi dau bai moi)."""
+    """Xoa toan bo ket qua kiem duyet + lam moi khung nhap lieu (text + uploader).
+
+    TASK_V2.2: bam "Bat dau bai moi" se xoa sach **ca** van ban trong o soan
+    thao **va** file Word da nap (doi phien ban uploader -> Streamlit tao lai
+    widget ``st.file_uploader`` rong).
+    """
     for key in (
         STATE_RESULT,
         STATE_ORIGINAL,
@@ -455,6 +469,21 @@ def reset_review_state() -> None:
         STATE_USED_SKILL,
     ):
         st.session_state.pop(key, None)
+
+    # Xoa o soan thao: gan truc tiep neu widget chua render; luon dat co
+    # "pending" de lan chay sau xoa cho chac (Streamlit cam sua gia tri widget
+    # da render trong cung lan chay).
+    try:
+        st.session_state[STATE_ARTICLE_TEXT_AREA] = ""
+    except Exception:  # noqa: BLE001 - widget da render -> xoa o lan chay sau
+        pass
+    st.session_state[STATE_CLEAR_INPUT_PENDING] = True
+
+    # Xoa danh dau file da boc tach + lam moi khung keo-tha.
+    st.session_state[STATE_LAST_PROCESSED_FILE] = ""
+    st.session_state[STATE_UPLOADER_VERSION] = (
+        int(st.session_state.get(STATE_UPLOADER_VERSION, 0) or 0) + 1
+    )
 
 
 def skill_option_label(skill: Dict[str, Any]) -> str:
@@ -823,72 +852,227 @@ def render_skill_selector() -> List[str]:
 
 
 def render_article_input() -> Tuple[str, str]:
-    """Ve khu vuc nhap bai va tra ve ``(van_ban, nhan_nguon)``.
+    """Ve khu vuc nhap bai hop nhat (Keo tha file Word + Dan van ban).
 
-    Uu tien file upload neu co; neu khong thi lay van ban dan truc tiep.
+    TASK_V2.2 — bo viet tach 2 tab ("Dan van ban" / "Tai file"), gop ve mot
+    khung duy nhat:
+
+    1. **Khung keo-tha file Word** o tren (``st.file_uploader`` nhan
+       ``.docx`` / ``.txt`` / ``.md``).
+    2. **Tu dong boc tach & day vao o soan thao**: ngay khi nguoi dung tha
+       file, he thong goi ``extract_uploaded_text`` va gan thang vao
+       ``st.session_state[STATE_ARTICLE_TEXT_AREA]``.
+    3. **O soan thao** ben duoi nhan truc tiep noi dung vua trich xuat (hoac
+       van ban dan tay) — nguoi dung doc/sua duoc roi bam "Bat dau Kiem Duyet"
+       ngay, khong can chuyen tab hay thao tac trung gian nao.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(van_ban_bai_bao, nhan_nguon)``.
     """
-    st.subheader("📥 Nhập bài báo")
-    tab_text, tab_file = st.tabs(
-        ["✍️ Dán văn bản", "📄 Tải file (.docx / .txt / .md)"]
-    )
+    st.subheader("📥 Nhập nội dung bài báo")
 
-    typed_text = ""
-    with tab_text:
-        # Nut nap bai mau: dua truoc o nhap de set session_state TRUOC khi
-        # widget duoc tao (Streamlit khong cho sua gia tri widget sau khi ve).
-        st.button(
+    uploader_version = int(st.session_state.get(STATE_UPLOADER_VERSION, 0) or 0)
+    uploader_key = f"article_file_uploader_{uploader_version}"
+
+    # -- 1. Hang cong cu phia tren: nut nap bai mau -------------------------
+    top_cols = st.columns([2, 5])
+    with top_cols[0]:
+        if st.button(
             "📰 Nạp bài mẫu (Demo Sample)",
             key="demo_sample_button",
-            help="Điền sẵn một bài mẫu có lỗi chính tả để demo toàn bộ quy trình.",
-        )
-        if st.session_state.get("demo_sample_button"):
+            help="Điền sẵn một bài mẫu có lỗi chính tả và nhân vật để thử nghiệm nhanh.",
+            use_container_width=True,
+        ):
             st.session_state[STATE_ARTICLE_TEXT_AREA] = SAMPLE_ARTICLE
-
-        typed_text = st.text_area(
-            "Toàn văn bài báo cần kiểm duyệt",
-            height=320,
-            key=STATE_ARTICLE_TEXT_AREA,
-            placeholder=(
-                "Dán tiêu đề và toàn văn bài báo vào đây...\n"
-                "Ví dụ:\n"
-                "Hội nghị khoa học quốc tế về AI khai mạc tại Hà Nội\n"
-                "Sáng ngày 17/10, tại Hà Nội đã diễn ra..."
-            ),
+            st.session_state[STATE_INPUT_SOURCE] = "Bài báo mẫu (Demo)"
+            st.session_state[STATE_LAST_PROCESSED_FILE] = ""
+    with top_cols[1]:
+        st.caption(
+            "👉 Kéo & thả file Word (.docx) vào khung bên dưới — hệ thống sẽ "
+            "**tự động nạp toàn văn** vào ô biên tập để bạn xem/sửa rồi bấm "
+            "**🚀 Bắt Đầu Kiểm Duyệt**."
         )
 
-    uploaded_file = None
-    with tab_file:
-        uploaded_file = st.file_uploader(
-            "Chọn file bài báo gốc",
-            type=["docx", "txt", "md"],
-            help="File Word (.docx) hoặc file văn bản thuần (.txt, .md).",
-        )
+    # -- 2. Khung keo-tha file Word -----------------------------------------
+    uploaded_file = st.file_uploader(
+        "📁 Kéo & thả file Word (.docx / .txt / .md) vào đây hoặc bấm để chọn file từ máy tính:",
+        type=["docx", "txt", "md"],
+        key=uploader_key,
+        help=(
+            "Hỗ trợ file Microsoft Word (.docx) và file văn bản thuần (.txt, .md). "
+            "Hệ thống sẽ tự động bóc tách toàn bộ nội dung đưa vào ô biên tập "
+            "bên dưới."
+        ),
+    )
 
-    article_text = ""
-    source_label = ""
-
+    # -- 3. Tu dong boc tach khi co file moi duoc tha vao -------------------
     if uploaded_file is not None:
-        try:
-            article_text = extract_uploaded_text(uploaded_file)
-            source_label = f"File: {uploaded_file.name}"
-        except Exception as exc:  # hien loi ro rang thay vi crash ca app
-            st.error(f"Không đọc được file đã tải lên: {exc}")
-            return "", ""
-    elif typed_text.strip():
-        article_text = typed_text.strip()
-        source_label = "Văn bản dán trực tiếp"
+        file_sig = f"{uploaded_file.name}_{getattr(uploaded_file, 'size', 0)}"
+        if st.session_state.get(STATE_LAST_PROCESSED_FILE) != file_sig:
+            try:
+                extracted_content = extract_uploaded_text(uploaded_file)
+                if extracted_content.strip():
+                    # Gan TRUOC khi widget text_area duoc tao ben duoi.
+                    st.session_state[STATE_ARTICLE_TEXT_AREA] = extracted_content
+                    st.session_state[STATE_INPUT_SOURCE] = f"File: {uploaded_file.name}"
+                    st.session_state[STATE_LAST_PROCESSED_FILE] = file_sig
+                    st.success(
+                        f"✅ Đã nạp tự động toàn văn từ file "
+                        f"**{uploaded_file.name}** vào ô biên tập bên dưới!"
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ File **{uploaded_file.name}** rỗng hoặc không có văn bản."
+                    )
+            except Exception as exc:  # noqa: BLE001 - hien loi ro rang, khong crash app
+                st.error(f"❌ Không thể đọc file Word: {exc}")
+
+    # -- 4. O van ban bien tap & kiem duyet ---------------------------------
+    typed_text = st.text_area(
+        "Văn bản bài báo cần kiểm duyệt (có thể chỉnh sửa trực tiếp):",
+        height=320,
+        key=STATE_ARTICLE_TEXT_AREA,
+        placeholder=(
+            "Kéo thả file Word vào khung phía trên HOẶC dán trực tiếp bài báo vào đây...\n"
+            "Ví dụ:\n"
+            "Hội nghị khoa học quốc tế về AI khai mạc tại Hà Nội\n"
+            "Sáng ngày 17/10, tại Hà Nội đã diễn ra..."
+        ),
+    )
+
+    # -- 5. Xac dinh bai bao va nhan nguon ----------------------------------
+    article_text = (typed_text or "").strip()
+    source_label = st.session_state.get(STATE_INPUT_SOURCE) or "Văn bản dán trực tiếp"
 
     if article_text:
         st.info(
-            f"Đã nhận **{format_word_char_caption(article_text)}** — "
-            f"nguồn: {source_label}"
+            f"📄 Đã nhận **{format_word_char_caption(article_text)}** — "
+            f"Nguồn: **{source_label}**"
         )
-        with st.expander("Xem trước nội dung bài báo"):
-            st.text(
-                article_text[:3000] + ("..." if len(article_text) > 3000 else "")
-            )
+
+    # -- 6. (UX) Cau noi Drag & Drop truc tiep vao textarea ----------------
+    _render_dropzone_bridge_js()
 
     return article_text, source_label
+
+
+def _render_dropzone_bridge_js() -> None:
+    """Bau cua Drag & Drop: tha file Word thang vao o soan thao cung duoc.
+
+    ``st.file_uploader`` chi nhan file khi tha DUNG vao khung upload. Script
+    nay chuyen file bi tha len o ``textarea`` sang ``input[type=file]`` cua
+    Streamlit de kich hoat dung co che tu dong boc tach.
+
+    Dung ``st.iframe`` (khong deprecated nhu ``components.html``) — no cho phep
+    truy cap same-origin vao trang Streamlit de doc DOM.
+    """
+    html_snippet = """
+        <script>
+        (function () {
+            const doc = window.parent && window.parent.document;
+            if (!doc) { return; }
+            // Chi gan 1 lan cho trang (tranh chong lap listener khi rerun).
+            if (doc.__geminiDropBridge) { return; }
+
+            function findFileInput(root) {
+                if (!root) { return null; }
+                const direct = root.querySelector('input[type="file"]');
+                if (direct) { return direct; }
+                const all = root.querySelectorAll('*');
+                for (let i = 0; i < all.length; i++) {
+                    if (all[i].shadowRoot) {
+                        const nested = all[i].shadowRoot.querySelector('input[type="file"]');
+                        if (nested) { return nested; }
+                    }
+                }
+                return null;
+            }
+
+            function findUploader() {
+                const nodes = doc.querySelectorAll('[data-testid="stFileUploader"]');
+                return nodes.length ? nodes[0] : null;
+            }
+
+            function findTextareaBelow(uploader) {
+                const uRect = uploader.getBoundingClientRect();
+                const areas = doc.querySelectorAll('textarea');
+                let best = null;
+                let bestDelta = Infinity;
+                for (let i = 0; i < areas.length; i++) {
+                    const rect = areas[i].getBoundingClientRect();
+                    const delta = rect.top - uRect.bottom;
+                    if (delta >= -8 && delta < bestDelta) {
+                        bestDelta = delta;
+                        best = areas[i];
+                    }
+                }
+                return best;
+            }
+
+            function bind() {
+                const uploader = findUploader();
+                if (!uploader) { return false; }
+                const fileInput = findFileInput(uploader);
+                if (!fileInput) { return false; }
+                const area = findTextareaBelow(uploader);
+                if (!area) { return false; }
+
+                const targets = [uploader, area];
+                for (let t = 0; t < targets.length; t++) {
+                    const el = targets[t];
+                    el.addEventListener('dragover', function (e) {
+                        e.preventDefault();
+                        el.style.outline = '2px dashed #1e88e5';
+                        el.style.backgroundColor = '#f0f9ff';
+                    });
+                    el.addEventListener('dragleave', function () {
+                        el.style.outline = '';
+                        el.style.backgroundColor = '';
+                    });
+                    el.addEventListener('drop', function (e) {
+                        el.style.outline = '';
+                        el.style.backgroundColor = '';
+                        try {
+                            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                e.preventDefault();
+                                fileInput.files = e.dataTransfer.files;
+                                fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        } catch (err) {
+                            // Trinh duyet khong cho gan FileList truc tiep -> bo qua.
+                        }
+                    });
+                }
+                return true;
+            }
+
+            doc.__geminiDropBridge = true;
+            // Streamlit render DOM bat dong bo -> thu gan lai vai lan.
+            let attempts = 0;
+            const timer = setInterval(function () {
+                attempts += 1;
+                if (bind() || attempts > 20) { clearInterval(timer); }
+            }, 200);
+        })();
+        </script>
+    """
+
+    # ``st.iframe`` yeu cau ``width``/``height`` la so NGUYEN DUONG (hoac
+    # ``"stretch"``/``"content"``) -> truyen 0 se nem exception va lam dung
+    # phan con lai cua trang. Dung 1px + try/except, neu that bai thi lui ve
+    # ``components.html`` (van chay duoc tren Streamlit hien tai).
+    if hasattr(st, "iframe"):
+        try:
+            st.iframe(html_snippet, height=1, width="stretch")
+            return
+        except Exception:  # noqa: BLE001 - lui ve cach goi du phong
+            pass
+    try:
+        components.html(html_snippet, height=0)
+    except Exception:  # noqa: BLE001 - bridge la phu thuong, khong lam hong trang
+        pass
 
 
 def render_results(options: Dict[str, Any]) -> None:
@@ -916,6 +1100,8 @@ def render_results(options: Dict[str, Any]) -> None:
 
     spelling_errors = result.get("spelling_errors") or []
     fact_checks = result.get("fact_checks") or []
+    suggested_titles = result.get("suggested_titles") or []
+    skill_notes = (result.get("skill_notes") or "").strip()
     grounding_sources = result.get("grounding_sources") or []
     search_queries = result.get("search_queries") or []
     edited_text = (result.get("edited_text") or "").strip()
@@ -957,14 +1143,48 @@ def render_results(options: Dict[str, Any]) -> None:
             if used_skill:
                 st.caption(f"🧠 Kỹ năng áp dụng: **{used_skill['name']}**")
 
-    metric_cols = st.columns(5)
+    metric_cols = st.columns(6 if suggested_titles else 5)
     metric_cols[0].metric("Lỗi chính tả", len(spelling_errors))
     metric_cols[1].metric("Mục kiểm chứng", len(fact_checks))
-    metric_cols[2].metric("Nguồn tham khảo", len(grounding_sources))
-    metric_cols[3].metric(
-        "Bài gốc", format_word_char_caption(original_text)
-    )
-    metric_cols[4].metric("Model", result.get("model", DEFAULT_MODEL))
+    if suggested_titles:
+        metric_cols[2].metric("Gợi ý tiêu đề", len(suggested_titles))
+        metric_cols[3].metric("Nguồn tham khảo", len(grounding_sources))
+        metric_cols[4].metric(
+            "Bài gốc", format_word_char_caption(original_text)
+        )
+        metric_cols[5].metric("Model", result.get("model", DEFAULT_MODEL))
+    else:
+        metric_cols[2].metric("Nguồn tham khảo", len(grounding_sources))
+        metric_cols[3].metric(
+            "Bài gốc", format_word_char_caption(original_text)
+        )
+        metric_cols[4].metric("Model", result.get("model", DEFAULT_MODEL))
+
+    # -- Khoi: Goi y tieu de (SEO / Bao chi) neu co ----------------------------
+    if suggested_titles:
+        st.subheader("🏷️ Phương án tiêu đề gợi ý (SEO / Báo chí)")
+        st.markdown(
+            "> 💡 **Các phương án tiêu đề tối ưu do AI đề xuất dựa trên kỹ năng được chọn:**"
+        )
+        for idx, title_item in enumerate(suggested_titles, start=1):
+            title_text = str(title_item).strip()
+            char_count = len(title_text)
+            if 40 <= char_count <= 70:
+                badge = "🟢 Chuẩn SEO"
+            elif char_count < 40:
+                badge = "🟡 Ngắn"
+            else:
+                badge = "🟡 Hơi dài (>70 ký tự)"
+            st.markdown(
+                f"- **{idx}. {title_text}**  `({char_count} ký tự — {badge})`"
+            )
+        with st.expander("📋 Sao chép nhanh toàn bộ danh sách tiêu đề", expanded=False):
+            st.code("\n".join(f"{i}. {t}" for i, t in enumerate(suggested_titles, start=1)), language=None)
+
+    # -- Khoi: Ket qua chuyen sau tu Ky nang bo sung (neu co) -----------------
+    if skill_notes:
+        st.subheader("💡 Kết quả chuyên môn từ Kỹ năng bổ sung")
+        st.markdown(skill_notes)
 
     # -- Bang 1: loi chinh ta -------------------------------------------------
     st.subheader("🔤 Lỗi chính tả & gợi ý sửa")
@@ -1042,7 +1262,8 @@ def render_results(options: Dict[str, Any]) -> None:
     )
     download_cols[1].caption(
         "Báo cáo Word chuẩn tòa soạn gồm: Bảng thống kê chi tiết lỗi chính tả (Lỗi sai, vị trí, gợi ý sửa, căn cứ), "
-        "Bảng kiểm chứng nhân vật & sự kiện (kèm đường dẫn URL xác thực), và Phụ lục nguồn Google Search thời gian thực."
+        "Bảng kiểm chứng nhân vật & sự kiện (kèm đường dẫn URL xác thực), Phương án tiêu đề gợi ý (nếu có), "
+        "và Phụ lục nguồn Google Search thời gian thực."
     )
 
 
@@ -1371,9 +1592,10 @@ def render_review_tab(options: Dict[str, Any]) -> None:
 
 
     if reset_clicked:
+        # `reset_review_state()` da xoa sach ca van ban + lam moi khung keo-tha
+        # (doi phien ban uploader) va dat co "pending" de xoa o soan thao o
+        # LAN CHAY TIEP THEO (truoc khi widget duoc tao).
         reset_review_state()
-        # Xoa o nhap o LAN CHAY TIEP THEO (truoc khi widget duoc tao).
-        st.session_state[STATE_CLEAR_INPUT_PENDING] = True
         st.rerun()
 
     if web_review_clicked:

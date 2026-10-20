@@ -131,6 +131,26 @@ def write_clipboard_windows(html_payload: str, text_payload: str) -> bool:
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
 
+        # --- KHAI BAO KIEU DUONG (bat buoc tren Windows 64-bit) -------------
+        # Mac dinh cua ``ctypes`` la ``c_int`` (32-bit) cho moi ham Win32 ->
+        # ``HGLOBAL``/con tro 64-bit bi CAT NGAN -> ``memmove`` ghi vao dia
+        # chi sai -> **Windows fatal exception: access violation** (lam server
+        # Streamlit sup). Phai khai bao ro restype/argtypes cho tung ham.
+        kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+        kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalUnlock.restype = wintypes.BOOL
+        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        user32.SetClipboardData.restype = wintypes.HANDLE
+        user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        user32.OpenClipboard.restype = wintypes.BOOL
+        user32.OpenClipboard.argtypes = [wintypes.HWND]
+        user32.CloseClipboard.restype = wintypes.BOOL
+        user32.EmptyClipboard.restype = wintypes.BOOL
+        user32.RegisterClipboardFormatW.restype = wintypes.UINT
+        user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+
         html_format = user32.RegisterClipboardFormatW(CF_HTML_FORMAT_NAME)
         if html_format == 0:
             return False

@@ -180,6 +180,9 @@ class TestNormalize(unittest.TestCase):
         result = normalize_review_result({})
         self.assertEqual(result["spelling_errors"], [])
         self.assertEqual(result["fact_checks"], [])
+        self.assertEqual(result["suggested_titles"], [])
+        self.assertEqual(result["skill_notes"], "")
+        self.assertEqual(result["custom_fields"], {})
         self.assertEqual(result["edited_text"], "")
 
     def test_list_entry_mapped_by_position(self) -> None:
@@ -198,6 +201,28 @@ class TestNormalize(unittest.TestCase):
         entry = result["fact_checks"][0]
         for field in ("thong_tin_can_check", "ket_qua_xac_minh", "trich_dan_nguon", "do_tin_cay"):
             self.assertIn(field, entry)
+
+    def test_suggested_titles_and_skill_notes_normalization(self) -> None:
+        result = normalize_review_result(
+            {
+                "suggested_titles": ["Tiêu đề 1", "Tiêu đề 2"],
+                "skill_notes": "Đoạn văn Sapo hấp dẫn mở đầu bài báo...",
+            }
+        )
+        self.assertEqual(result["suggested_titles"], ["Tiêu đề 1", "Tiêu đề 2"])
+        self.assertEqual(result["skill_notes"], "Đoạn văn Sapo hấp dẫn mở đầu bài báo...")
+
+    def test_custom_fields_captured_and_converted_to_skill_notes(self) -> None:
+        result = normalize_review_result(
+            {
+                "sapo": "Đoạn sapo mở đầu",
+                "hashtags": ["#BaoChi", "#KiemDuyet"],
+            }
+        )
+        self.assertIn("sapo", result["custom_fields"])
+        self.assertIn("hashtags", result["custom_fields"])
+        self.assertIn("Đoạn sapo mở đầu", result["skill_notes"])
+        self.assertIn("#BaoChi", result["skill_notes"])
 
 
 class TestAIReviewerWithFakeClient(unittest.TestCase):

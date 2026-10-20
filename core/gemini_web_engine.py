@@ -432,7 +432,7 @@ class GeminiWebEngine:
             "   - Nếu chức danh sai, lỗi thời, gán ghép nhầm hoặc nhân vật không giữ vị trí nêu trên, "
             "BẮT BUỘC cảnh báo sai lệch và hướng dẫn sửa chuẩn.\n\n"
             "3. TUYỆT ĐỐI KHÔNG IN LẠI TOÀN VĂN BÀI BÁO: Chỉ tập trung phát hiện lỗi và trả về đúng đối tượng JSON "
-            "gồm spelling_errors và fact_checks (không tạo lại toàn văn bài báo để tiết kiệm token và tăng tối đa tốc độ)."
+            "gồm spelling_errors, fact_checks, suggested_titles và skill_notes (không tạo lại toàn văn bài báo để tiết kiệm token và tăng tối đa tốc độ)."
         )
 
         # 5. Bài báo & JSON schema
@@ -496,7 +496,7 @@ class GeminiWebEngine:
                 search_queries=realtime_query,
                 raw_response_text=raw_text,
             )
-            if norm.get("spelling_errors") or norm.get("fact_checks"):
+            if norm.get("spelling_errors") or norm.get("fact_checks") or norm.get("suggested_titles") or norm.get("skill_notes"):
                 return norm
         except Exception:
             pass

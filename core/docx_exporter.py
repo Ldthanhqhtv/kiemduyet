@@ -69,6 +69,8 @@ HIGHLIGHT_DRAFT_HEADING = "BẢN THẢO GỐC ĐÁNH DẤU LỖI NGHI NGỜ"
 #: Tieu de cac muc.
 SPELLING_SECTION_HEADING = "I. THỐNG KÊ LỖI CHÍNH TẢ"
 FACT_SECTION_HEADING = "II. KIỂM CHỨNG SỰ KIỆN & NHÂN VẬT (FACT-CHECK)"
+SUGGESTED_TITLES_SECTION_HEADING = "III. PHƯƠNG ÁN TIÊU ĐỀ GỢI Ý (SEO / BÁO CHÍ)"
+SKILL_NOTES_SECTION_HEADING = "IV. KẾT QUẢ KỸ NĂNG CHUYÊN SÂU (BỔ SUNG)"
 GROUNDING_SECTION_HEADING = "Nguồn tham chiếu tra cứu (Google Search)"
 
 #: Tieu de cot cac bang.
@@ -321,9 +323,31 @@ def coerce_review_result(review_result: Any) -> Dict[str, Any]:
     if isinstance(facts, dict):
         facts = [facts]
 
+    titles_raw = (
+        data.get("suggested_titles")
+        or data.get("titles")
+        or data.get("tieu_de")
+        or []
+    )
+    if isinstance(titles_raw, (list, tuple)):
+        suggested_titles = [_as_text(t) for t in titles_raw if _as_text(t)]
+    elif isinstance(titles_raw, str) and titles_raw.strip():
+        suggested_titles = [_as_text(t) for t in titles_raw.splitlines() if _as_text(t)]
+    else:
+        suggested_titles = []
+
+    skill_notes = _as_text(
+        data.get("skill_notes")
+        or data.get("skill_output")
+        or data.get("skill_result")
+        or data.get("custom_notes")
+    )
+
     return {
         "spelling_errors": [item for item in spelling if isinstance(item, dict)],
         "fact_checks": [item for item in facts if isinstance(item, dict)],
+        "suggested_titles": suggested_titles,
+        "skill_notes": skill_notes,
         "edited_text": _as_text(data.get("edited_text")),
         "grounding_sources": [
             item for item in (data.get("grounding_sources") or []) if isinstance(item, dict)
@@ -466,11 +490,14 @@ def _add_cover_header(
             doc, f"Model kiểm duyệt: {review['model']}", size=11, space_after=2
         )
 
-    summary = (
-        f"Tổng lỗi chính tả: {len(review['spelling_errors'])}   |   "
-        f"Mục kiểm chứng: {len(review['fact_checks'])}   |   "
-        f"Nguồn tham chiếu: {len(review['grounding_sources'])}"
-    )
+    summary_parts = [
+        f"Tổng lỗi chính tả: {len(review['spelling_errors'])}",
+        f"Mục kiểm chứng: {len(review['fact_checks'])}",
+    ]
+    if review.get("suggested_titles"):
+        summary_parts.append(f"Gợi ý tiêu đề: {len(review['suggested_titles'])}")
+    summary_parts.append(f"Nguồn tham chiếu: {len(review['grounding_sources'])}")
+    summary = "   |   ".join(summary_parts)
     summary_paragraph = _add_paragraph(doc, summary, size=11, space_before=4, space_after=8)
     _set_paragraph_bottom_border(summary_paragraph, color=BORDER_COLOR, size=4)
 
@@ -621,6 +648,65 @@ def _add_grounding_appendix(
         paragraph.paragraph_format.line_spacing = 1.15
         run = paragraph.add_run(f"{index}. {title} - {uri}")
         _set_run_font(run, size=10)
+
+
+def _add_suggested_titles(doc: DocumentObject, titles: List[str]) -> None:
+    """Them phan tieu de goi y (SEO / Bao chi) neu co."""
+    if not titles:
+        return
+
+    _add_paragraph(
+        doc,
+        SUGGESTED_TITLES_SECTION_HEADING,
+        size=13,
+        bold=True,
+        space_before=8,
+        space_after=4,
+    )
+    for idx, title_text in enumerate(titles, start=1):
+        clean_title = _as_text(title_text)
+        if not clean_title:
+            continue
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(3)
+        p.paragraph_format.line_spacing = 1.15
+
+        run_num = p.add_run(f"Phương án {idx}: ")
+        run_num.bold = True
+        _set_run_font(run_num, size=11, color=RGBColor(0x1F, 0x4E, 0x79))
+
+        run_text = p.add_run(clean_title)
+        _set_run_font(run_text, size=11)
+
+        char_count = len(clean_title)
+        run_count = p.add_run(f" ({char_count} ký tự)")
+        run_count.italic = True
+        _set_run_font(run_count, size=9.5, color=RGBColor(0x70, 0x80, 0x90))
+
+
+def _add_skill_notes(doc: DocumentObject, notes: str) -> None:
+    """Them phan ket qua chuyen sau tu Ky nang bo sung (Sapo, phan tich, tu khoa...)."""
+    clean_notes = (notes or "").strip()
+    if not clean_notes:
+        return
+
+    _add_paragraph(
+        doc,
+        SKILL_NOTES_SECTION_HEADING,
+        size=13,
+        bold=True,
+        space_before=8,
+        space_after=4,
+    )
+    for raw_line in clean_notes.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(2)
+        p.paragraph_format.line_spacing = 1.15
+        run = p.add_run(line)
+        _set_run_font(run, size=11)
 
 
 # ---------------------------------------------------------------------------
@@ -867,6 +953,14 @@ def build_report_document(
         space_after=6,
     )
     _add_fact_table(doc, review["fact_checks"])
+
+    # Gợi ý tiêu đề bài báo (nếu có)
+    if review.get("suggested_titles"):
+        _add_suggested_titles(doc, review["suggested_titles"])
+
+    # Kết quả kỹ năng chuyên môn bổ sung (nếu có)
+    if review.get("skill_notes"):
+        _add_skill_notes(doc, review["skill_notes"])
 
     if include_grounding_appendix:
         _add_grounding_appendix(doc, review["grounding_sources"])

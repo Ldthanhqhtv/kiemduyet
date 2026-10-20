@@ -24,6 +24,8 @@ from core.docx_exporter import (
     HIGHLIGHT_DRAFT_HEADING,
     REPORT_TITLE,
     SPELLING_TABLE_HEADERS,
+    SUGGESTED_TITLES_SECTION_HEADING,
+    SKILL_NOTES_SECTION_HEADING,
     build_report_document,
     coerce_review_result,
     export_review_to_bytes,
@@ -303,6 +305,26 @@ class TestHighlightedDraft(unittest.TestCase):
             export_datetime=datetime(2026, 1, 1, 0, 0),
         )
         self.assertIn("(Không có nội dung văn bản gốc.)", _all_text(doc))
+
+    def test_export_includes_suggested_titles_and_skill_notes(self) -> None:
+        result = {
+            "spelling_errors": [],
+            "fact_checks": [],
+            "suggested_titles": ["Tiêu đề gợi ý 1 chuẩn SEO", "Tiêu đề gợi ý 2"],
+            "skill_notes": "Sapo mở đầu bài báo hấp dẫn về công nghiệp Tân Bình.",
+            "edited_text": "Bản thảo đã sửa.",
+        }
+        doc = build_report_document(
+            ORIGINAL_TEXT,
+            result,
+            export_datetime=datetime(2026, 1, 1, 0, 0),
+        )
+        text = _all_text(doc)
+        self.assertIn(SUGGESTED_TITLES_SECTION_HEADING, text)
+        self.assertIn("Tiêu đề gợi ý 1 chuẩn SEO", text)
+        self.assertIn(SKILL_NOTES_SECTION_HEADING, text)
+        self.assertIn("Sapo mở đầu bài báo hấp dẫn", text)
+        self.assertIn("Gợi ý tiêu đề: 2", text)
 
 
 if __name__ == "__main__":

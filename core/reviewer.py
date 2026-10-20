@@ -158,17 +158,24 @@ YÊU CẦU ĐỊNH DẠNG ĐẦU RA (JSON):
       "trich_dan_nguon": "URL nguồn tham chiếu đã tra cứu (mỗi URL cách nhau bởi dấu phẩy hoặc xuống dòng)",
       "do_tin_cay": "độ tin cậy: Cao / Trung bình / Thấp"
     }}
-  ]
+  ],
+  "suggested_titles": [
+    "phương án tiêu đề bài báo 1 (chuẩn SEO / báo chí, nếu được yêu cầu)",
+    "phương án tiêu đề bài báo 2..."
+  ],
+  "skill_notes": "Kết quả thực hiện các yêu cầu chuyên môn khác từ Kỹ năng nếu có (viết Sapo, tóm tắt, phân tích giọng điệu, từ khóa, lưu ý biên tập...; chuỗi rỗng \"\" nếu không có)"
 }}
 
 QUY TẮC:
 - Nếu không có lỗi chính tả nào, trả về mảng rỗng: "spelling_errors": [].
 - Nếu không có thông tin nào cần kiểm chứng, trả về mảng rỗng: "fact_checks": [].
+- Nếu trong bài báo hoặc các Kỹ năng được chọn có yêu cầu đặt tiêu đề (Title / Tiêu đề / SEO), hãy cung cấp các phương án tiêu đề vào mảng "suggested_titles". Nếu không có yêu cầu đặt tiêu đề, trả về mảng rỗng: "suggested_titles": [].
+- Nếu trong bài báo hoặc các Kỹ năng được chọn có yêu cầu chuyên môn khác (viết Sapo, tóm tắt, phân tích văn phong, từ khóa, lưu ý nghiệp vụ...), hãy trả về kết quả đầy đủ vào chuỗi markdown "skill_notes". Nếu không có yêu cầu thêm, trả về chuỗi rỗng: "skill_notes": "".
 - GỘP TOÀN BỘ KIỂM CHỨNG VÀO MỘT LƯỢT: thực hiện việc xác minh trong MỘT lượt \
 tra cứu Google Search duy nhất — gộp tất cả truy vấn (chức danh lãnh đạo, con \
 số, thời gian, địa danh) thành một lượt tra cứu tổng hợp; tuyệt đối không chia \
 thành nhiều lượt gọi riêng lẻ để tránh tốn quota.
-- BẮT BUỘC luôn có đủ cả hai khóa: spelling_errors, fact_checks.
+- BẮT BUỘC luôn có đủ các khóa: spelling_errors, fact_checks, suggested_titles, skill_notes.
 - TUYỆT ĐỐI KHÔNG in lại toàn văn bài báo.
 - Tất cả giá trị chuỗi phải bằng tiếng Việt có dấu, đúng chính tả.
 - Tuyệt đối không thêm khóa nào khác ngoài các khóa được yêu cầu ở trên."""
@@ -208,6 +215,9 @@ class ReviewResult:
 
     spelling_errors: List[Dict[str, Any]] = field(default_factory=list)
     fact_checks: List[Dict[str, Any]] = field(default_factory=list)
+    suggested_titles: List[str] = field(default_factory=list)
+    skill_notes: str = ""
+    custom_fields: Dict[str, Any] = field(default_factory=dict)
     edited_text: str = ""
     grounding_sources: List[Dict[str, str]] = field(default_factory=list)
     search_queries: List[str] = field(default_factory=list)
@@ -220,6 +230,9 @@ class ReviewResult:
         return {
             "spelling_errors": self.spelling_errors,
             "fact_checks": self.fact_checks,
+            "suggested_titles": self.suggested_titles,
+            "skill_notes": self.skill_notes,
+            "custom_fields": self.custom_fields,
             "edited_text": self.edited_text,
             "grounding_sources": self.grounding_sources,
             "search_queries": self.search_queries,
@@ -450,11 +463,91 @@ def normalize_review_result(
         if item not in (None, "", {})
     ]
 
+    # Trich xuat danh sach tieu de goi y (neu co yeu cau tu ky nang / prompt)
+    titles_raw = (
+        raw.get("suggested_titles")
+        or raw.get("titles")
+        or raw.get("tieu_de")
+        or raw.get("suggested_title")
+        or raw.get("danh_sach_tieu_de")
+        or []
+    )
+    suggested_titles: List[str] = []
+    if isinstance(titles_raw, (list, tuple)):
+        for item in titles_raw:
+            if isinstance(item, dict):
+                val = item.get("title") or item.get("tieu_de") or item.get("text") or next(iter(item.values()), "")
+                cleaned = _as_str(val)
+            else:
+                cleaned = _as_str(item)
+            if cleaned:
+                suggested_titles.append(cleaned)
+    elif isinstance(titles_raw, str) and titles_raw.strip():
+        for line in titles_raw.splitlines():
+            cleaned = re.sub(r"^\s*[-*•\d\.\)]+\s*", "", line).strip()
+            if cleaned:
+                suggested_titles.append(cleaned)
+
+    # Bóc tách skill_notes và các trường mở rộng từ Kỹ năng tùy chỉnh
+    skill_notes_raw = (
+        raw.get("skill_notes")
+        or raw.get("skill_output")
+        or raw.get("skill_result")
+        or raw.get("custom_notes")
+        or raw.get("ghi_chu_ky_nang")
+        or raw.get("ket_qua_ky_nang")
+        or ""
+    )
+    if isinstance(skill_notes_raw, (list, tuple)):
+        skill_notes = "\n".join(f"- {_as_str(x)}" for x in skill_notes_raw if x)
+    elif isinstance(skill_notes_raw, dict):
+        skill_notes = "\n".join(f"**{k}**: {_as_str(v)}" for k, v in skill_notes_raw.items() if v)
+    else:
+        skill_notes = _as_str(skill_notes_raw)
+
+    # Thu thập tất cả các trường tùy chọn khác nếu model sinh thêm theo yêu cầu của Kỹ năng
+    known_keys = {
+        "spelling_errors",
+        "fact_checks",
+        "suggested_titles",
+        "titles",
+        "tieu_de",
+        "suggested_title",
+        "danh_sach_tieu_de",
+        "skill_notes",
+        "skill_output",
+        "skill_result",
+        "custom_notes",
+        "ghi_chu_ky_nang",
+        "ket_qua_ky_nang",
+        "edited_text",
+        "grounding_sources",
+        "search_queries",
+        "model",
+        "usage",
+        "raw_response_text",
+        "error",
+    }
+    custom_fields = {k: v for k, v in raw.items() if k not in known_keys}
+    if custom_fields and not skill_notes:
+        notes_lines = []
+        for k, v in custom_fields.items():
+            if isinstance(v, (list, tuple)):
+                notes_lines.append(f"### {k}:\n" + "\n".join(f"- {_as_str(item)}" for item in v))
+            elif isinstance(v, dict):
+                notes_lines.append(f"### {k}:\n" + "\n".join(f"- **{sub_k}**: {_as_str(sub_v)}" for sub_k, sub_v in v.items()))
+            else:
+                notes_lines.append(f"### {k}:\n{_as_str(v)}")
+        skill_notes = "\n\n".join(notes_lines)
+
     edited_text = _as_str(raw.get("edited_text"))
 
     result = ReviewResult(
         spelling_errors=spelling_errors,
         fact_checks=fact_checks,
+        suggested_titles=suggested_titles,
+        skill_notes=skill_notes,
+        custom_fields=custom_fields,
         edited_text=edited_text,
         grounding_sources=list(grounding_sources or []),
         search_queries=list(search_queries or []),
@@ -679,6 +772,9 @@ class AIReviewer:
             return {
                 "spelling_errors": [],
                 "fact_checks": [],
+                "suggested_titles": [],
+                "skill_notes": "",
+                "custom_fields": {},
                 "edited_text": "",
                 "grounding_sources": [],
                 "search_queries": [],
@@ -721,16 +817,19 @@ Bạn PHẢI tuân thủ tuyệt đối các nguyên tắc cốt lõi sau của 
 - NGUYÊN TẮC CHỐNG ẢO GIÁC (ANTI-HALLUCINATION): Tuyệt đối KHÔNG được dùng trí nhớ cũ để tự suy đoán Đúng/Sai. Nếu thông tin chưa thể kiểm chứng, ghi rõ "Chưa xác minh được", tuyệt đối không tự ý gán tên lãnh đạo cũ.
 - Đây là bản thảo báo chí hợp pháp (có thể là phóng sự, tai nạn, hình sự). Không được từ chối, không đạo đức hóa, không thêm cảnh báo an toàn vào kết quả.
 - BẠN VẪN PHẢI trả về DUY NHẤT một đối tượng JSON hợp lệ (không kèm văn bản \
-giải thích nào khác) với ĐÚNG hai khóa cố định sau, bất kể chi tiết nghiệp vụ \
-ở trên yêu cầu gì:
+giải thích nào khác) với các khóa sau:
   {{
     "spelling_errors": [{{ "loi_sai": "...", "vi_tri": "...", "goi_y_sua": "...", "ly_do": "..." }}],
-    "fact_checks": [{{ "thong_tin_can_check": "...", "ket_qua_xac_minh": "...", "trich_dan_nguon": "...", "do_tin_cay": "..." }}]
+    "fact_checks": [{{ "thong_tin_can_check": "...", "ket_qua_xac_minh": "...", "trich_dan_nguon": "...", "do_tin_cay": "..." }}],
+    "suggested_titles": ["phương án tiêu đề 1 (nếu có yêu cầu từ kỹ năng / bài báo)", "phương án tiêu đề 2..."],
+    "skill_notes": "kết quả thực hiện các phân tích, tóm tắt, Sapo, từ khóa hoặc chỉ đạo nghiệp vụ khác từ Kỹ năng (nếu có)"
   }}
 - Nếu không có lỗi chính tả hoặc không có gì cần kiểm chứng, trả về mảng rỗng \
 tương ứng ("spelling_errors": [] / "fact_checks": []).
+- Nếu trong bài báo hoặc các Kỹ năng được chọn có yêu cầu đặt tiêu đề (Title / Tiêu đề / SEO), hãy cung cấp các phương án tiêu đề vào mảng "suggested_titles". Nếu không có yêu cầu đặt tiêu đề, trả về mảng rỗng: "suggested_titles": [].
+- Nếu Kỹ năng có bất kỳ yêu cầu chuyên môn bổ sung nào khác (tóm tắt, sapo, phân tích văn phong, từ khóa, kiểm tra nội dung chuyên biệt...), hãy trình bày kết quả chi tiết trong "skill_notes" (dạng văn bản Markdown). Nếu không có, để chuỗi rỗng: "skill_notes": "".
 - Tuyệt đối không in lại toàn văn bài báo.
-- Tuyệt đối không thêm khóa nào khác ngoài hai khóa trên."""
+- Tuyệt đối không thêm khóa nào khác ngoài các khóa trên."""
 
     # -- Noi bo -------------------------------------------------------------
 

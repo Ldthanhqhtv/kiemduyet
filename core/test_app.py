@@ -24,16 +24,20 @@ from streamlit.testing.v1 import AppTest
 from app import (
     AVAILABLE_MODELS,
     DEFAULT_MODEL,
+    DOCX_MIME,
     FACT_FIELDS,
     FACT_URL_COLUMN,
     SAMPLE_ARTICLE,
     SPELLING_FIELDS,
     STATE_ARTICLE_TEXT_AREA,
+    STATE_INPUT_SOURCE,
+    STATE_LAST_PROCESSED_FILE,
     STATE_MOMENT,
     STATE_ORIGINAL,
     STATE_RESULT,
     STATE_REVIEW_ID,
     STATE_SOURCE,
+    STATE_UPLOADER_VERSION,
     STATE_USED_SKILL,
     build_diff_html,
     count_words_chars,
@@ -1051,6 +1055,198 @@ class GeminiWebSessionUiTests(unittest.TestCase):
         self.assertTrue(app.session_state["review_result"].get("auth_error"))
         errors = " ".join(item.value for item in app.error)
         self.assertIn("liên hệ Admin", errors)
+
+
+class UnifiedArticleInputTests(unittest.TestCase):
+    """TASK_V2.2 - Khung nhap bai hop nhat: keo-tha file Word + dan van ban."""
+
+    @staticmethod
+    def _docx_bytes(*paragraphs: str) -> bytes:
+        import docx
+
+        document = docx.Document()
+        for text in paragraphs:
+            document.add_paragraph(text)
+        buffer = io.BytesIO()
+        document.save(buffer)
+        return buffer.getvalue()
+
+    # -- AC1: mot giao dien duy nhat, khong con 2 tab input -----------------
+    def test_input_area_has_no_two_separate_tabs(self):
+        app = _make_app()
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+
+        labels = [tab.label for tab in app.tabs]
+        self.assertFalse(
+            any("Dán văn bản" in label for label in labels),
+            msg=f"Van con tab 'Dan van ban': {labels}",
+        )
+        self.assertFalse(
+            any("Tải file" in label for label in labels),
+            msg=f"Van con tab 'Tai file': {labels}",
+        )
+        # Chi con 2 tab chinh (Kiem duyet bai bao / Quan ly Ky nang).
+        self.assertEqual(len(labels), 2)
+
+    def test_single_uploader_accepts_docx_txt_md(self):
+        app = _make_app()
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+
+        uploaders = app.file_uploader
+        self.assertEqual(len(uploaders), 1)
+        self.assertEqual(
+            {t.lstrip(".") for t in uploaders[0].allowed_type},
+            {"docx", "txt", "md"},
+        )
+        # Key co phien ban -> reset se tao widget moi.
+        self.assertTrue(uploaders[0].key.startswith("article_file_uploader_"))
+
+    # -- AC2: keo-tha file Word -> nap ngay vao o soan thao ------------------
+    def test_upload_word_file_populates_text_area(self):
+        app = _make_app()
+        app.file_uploader[0].upload(
+            "bai-bao.docx",
+            self._docx_bytes(
+                "Bài báo thử nghiệm từ file Word.", "Đoạn thứ hai của bài."
+            ),
+            DOCX_MIME,
+        )
+        app.run()
+
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+        value = app.text_area(key=STATE_ARTICLE_TEXT_AREA).value
+        self.assertIn("Bài báo thử nghiệm từ file Word.", value)
+        self.assertIn("Đoạn thứ hai của bài.", value)
+
+    def test_upload_txt_file_populates_text_area(self):
+        app = _make_app()
+        app.file_uploader[0].upload(
+            "bai.txt", "Nội dung bài từ file txt.".encode("utf-8"), "text/plain"
+        )
+        app.run()
+
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+        value = app.text_area(key=STATE_ARTICLE_TEXT_AREA).value
+        self.assertIn("Nội dung bài từ file txt.", value)
+
+    def test_upload_shows_source_label_with_file_name(self):
+        app = _make_app()
+        app.file_uploader[0].upload(
+            "bai-bao.docx", self._docx_bytes("Nội dung."), DOCX_MIME
+        )
+        app.run()
+
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+        self.assertIn(
+            "bai-bao.docx", str(app.session_state.get(STATE_INPUT_SOURCE, ""))
+        )
+        self.assertTrue(
+            any("bai-bao.docx" in item.value for item in app.success),
+            msg="Chua co thong bao nap file thanh cong",
+        )
+
+    def test_word_caption_counts_extracted_text(self):
+        app = _make_app()
+        app.file_uploader[0].upload(
+            "bai-bao.docx", self._docx_bytes("Một hai ba bốn năm."), DOCX_MIME
+        )
+        app.run()
+
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+        text = app.text_area(key=STATE_ARTICLE_TEXT_AREA).value
+        self.assertIn(format_word_char_caption(text), " ".join(
+            item.value for item in app.info
+        ))
+
+    # -- AC3: van ban trich xuat van bi sua duoc truc tiep --------------------
+    def test_extracted_text_can_be_edited_in_place(self):
+        app = _make_app()
+        app.file_uploader[0].upload(
+            "bai-bao.docx", self._docx_bytes("Bản gốc."), DOCX_MIME
+        )
+        app.run()
+
+        app.text_area(key=STATE_ARTICLE_TEXT_AREA).input("Bản đã sửa thủ công.")
+        app.run()
+
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+        self.assertEqual(
+            app.text_area(key=STATE_ARTICLE_TEXT_AREA).value, "Bản đã sửa thủ công."
+        )
+
+    # -- AC4: duyet lien mach, khong can buoc trung gian --------------------
+    def test_review_button_uses_uploaded_text_immediately(self):
+        from core import gemini_web_engine as gwe
+
+        app = _make_app()
+        app.file_uploader[0].upload(
+            "bai-bao.docx", self._docx_bytes("Bài cần kiểm duyệt."), DOCX_MIME
+        )
+        app.run()
+
+        payload = {
+            "spelling_errors": [],
+            "fact_checks": [],
+            "edited_text": "Bản đã biên tập.",
+        }
+        normalized = gwe.normalize_review_result(payload, model=gwe.GEMINI_WEB_MODEL_NAME)
+        fake_engine = mock.MagicMock()
+        fake_engine.is_granted.return_value = True
+        fake_engine.review_article_sync.return_value = normalized
+
+        with mock.patch.object(gwe, "GeminiWebEngine", return_value=fake_engine):
+            app.button(key="run_review_button").click()
+            app.run()
+
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+        self.assertTrue(fake_engine.review_article_sync.called)
+        sent_text = fake_engine.review_article_sync.call_args[0][0]
+        self.assertIn("Bài cần kiểm duyệt.", sent_text)
+
+    # -- AC5: nut reset xoa sach ca text va khung keo-tha ---------------------
+    def test_reset_clears_text_and_refreshes_uploader(self):
+        app = _make_app()
+        app.file_uploader[0].upload(
+            "bai-bao.docx", self._docx_bytes("Bài sẽ bị xóa."), DOCX_MIME
+        )
+        app.run()
+        self.assertIn(
+            "Bài sẽ bị xóa.", app.text_area(key=STATE_ARTICLE_TEXT_AREA).value
+        )
+
+        app.button(key="reset_review_button").click()
+        app.run()
+
+        self.assertFalse(app.exception, msg=f"App loi: {app.exception}")
+        # 1. O soan thao rong.
+        self.assertEqual(app.text_area(key=STATE_ARTICLE_TEXT_AREA).value, "")
+        # 2. Khung keo-tha duoc lam moi (key moi) va rong trong.
+        uploaders = app.file_uploader
+        self.assertEqual(len(uploaders), 1)
+        self.assertTrue(uploaders[0].key.endswith("_1"))
+        self.assertIsNone(uploaders[0].value)
+        # 3. Danh dau file da boc tach da xoa.
+        self.assertEqual(app.session_state.get(STATE_LAST_PROCESSED_FILE), "")
+
+    def test_reset_increments_uploader_version(self):
+        app = _make_app()
+        before = int(app.session_state.get(STATE_UPLOADER_VERSION, 0) or 0)
+
+        app.button(key="reset_review_button").click()
+        app.run()
+
+        after = int(app.session_state.get(STATE_UPLOADER_VERSION, 0) or 0)
+        self.assertEqual(after, before + 1)
+
+    def test_reset_clears_previous_review_result(self):
+        app = _make_app()
+        app.session_state[STATE_RESULT] = {"spelling_errors": [], "fact_checks": []}
+        app.run()
+
+        app.button(key="reset_review_button").click()
+        app.run()
+
+        self.assertNotIn(STATE_RESULT, app.session_state)
 
 
 if __name__ == "__main__":

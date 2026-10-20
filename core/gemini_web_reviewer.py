@@ -350,7 +350,7 @@ def parse_gemini_web_response(raw_text: str, original_article: str = "") -> Dict
     # 1. Thử parse JSON nếu Gemini có trả về đối tượng JSON
     try:
         raw_json = extract_json_from_text(raw_text)
-        if isinstance(raw_json, dict) and any(k in raw_json for k in ("spelling_errors", "fact_checks", "edited_text")):
+        if isinstance(raw_json, dict) and any(k in raw_json for k in ("spelling_errors", "fact_checks", "suggested_titles", "titles", "tieu_de", "skill_notes", "edited_text")):
             return normalize_review_result(
                 raw_json,
                 model="gemini-web (google-search)",
@@ -418,6 +418,49 @@ def parse_gemini_web_response(raw_text: str, original_article: str = "") -> Dict
             "do_tin_cay": "Cao",
         })
 
+    # Bóc tách gợi ý tiêu đề nếu có
+    suggested_titles = []
+    in_title_section = False
+    for line in lines:
+        sline = line.strip()
+        slower = sline.lower()
+        if any(h in slower for h in ("tiêu đề gợi ý", "gợi ý tiêu đề", "phương án tiêu đề", "tiêu đề chuẩn seo", "đặt tiêu đề", "seo title")):
+            in_title_section = True
+            continue
+        if in_title_section:
+            if sline.startswith(("#", "---", "===")) or ("|---" in sline):
+                in_title_section = False
+                continue
+            m = re.match(r"^[-*•\d\.\)]+\s*(.+)$", sline)
+            if m:
+                t = m.group(1).strip().strip('"').strip("'")
+                if t and len(t) > 5 and not t.lower().startswith(("lỗi", "stt", "vị trí", "bảng")):
+                    suggested_titles.append(t)
+            elif sline and not sline.startswith(("|", "```")):
+                if len(sline) > 10 and not any(k in slower for k in ("bảng", "chính tả", "kiểm chứng", "fact-check")):
+                    suggested_titles.append(sline.strip('"').strip("'"))
+
+    # Bóc tách các phần chuyên môn khác từ Kỹ năng nếu có (Sapo, tóm tắt, nhận xét, văn phong...)
+    skill_notes_lines = []
+    in_notes_section = False
+    for line in lines:
+        sline = line.strip()
+        slower = sline.lower()
+        if any(h in slower for h in ("sapo", "tóm tắt", "nhận xét", "đánh giá", "văn phong", "lưu ý biên tập", "từ khóa", "hashtag")):
+            if sline.startswith(("#", "**")):
+                in_notes_section = True
+                skill_notes_lines.append(sline)
+                continue
+        if in_notes_section:
+            if sline.startswith("|") and ("|" in sline[1:]):
+                in_notes_section = False
+                continue
+            if sline.startswith("## ") and not any(h in slower for h in ("sapo", "tóm tắt", "nhận xét", "đánh giá", "văn phong", "lưu ý", "từ khóa")):
+                in_notes_section = False
+                continue
+            skill_notes_lines.append(sline)
+    skill_notes = "\n".join(skill_notes_lines).strip()
+
     # Tạo bản thảo đã biên tập (thay thế các lỗi đã tìm thấy vào bài gốc)
     edited_text = original_article
     if original_article:
@@ -442,6 +485,8 @@ def parse_gemini_web_response(raw_text: str, original_article: str = "") -> Dict
         {
             "spelling_errors": spelling_errors,
             "fact_checks": fact_checks,
+            "suggested_titles": suggested_titles,
+            "skill_notes": skill_notes,
             "edited_text": edited_text,
         },
         model="gemini-web (google-search)",
