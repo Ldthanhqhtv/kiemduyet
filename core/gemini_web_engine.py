@@ -467,7 +467,7 @@ class GeminiWebEngine:
         target_model = self._resolve_target_model(client, DEFAULT_WEB_MODEL)
         try:
             response = await client.generate_content(
-                full_prompt, model=target_model, extended_thinking=False
+                full_prompt, model=target_model, extended_thinking=True
             )
             raw_text = getattr(response, "text", "") or ""
         except (AuthError, APIError) as exc:
@@ -475,7 +475,7 @@ class GeminiWebEngine:
             client = await self.init_client(force_refresh=True)
             target_model = self._resolve_target_model(client, DEFAULT_WEB_MODEL)
             response = await client.generate_content(
-                full_prompt, model=target_model, extended_thinking=False
+                full_prompt, model=target_model, extended_thinking=True
             )
             raw_text = getattr(response, "text", "") or ""
 
