@@ -180,8 +180,20 @@ def load_gemini_session(config_path: Optional[Path] = None) -> Dict[str, Any]:
         except (OSError, ValueError) as exc:
             LOGGER.warning("Khong doc duoc file config session: %s", exc)
 
-    # 2. Doc tu Streamlit Secrets hoac file ma hoa chi khi dung duong dan mac dinh (khong phai test override)
+    # 2. Doc tu file ma hoa config/gemini_session.enc (dong bo tu dong qua GitHub)
     if config_path is None or Path(config_path) == CONFIG_PATH:
+        try:
+            from core.gemini_session_sync import load_encrypted_session
+            enc_data = load_encrypted_session(ENC_CONFIG_PATH)
+            if enc_data and enc_data.get("secure_1psid") and enc_data.get("secure_1psid") != "PSID":
+                enc_data.setdefault("authuser", "0")
+                enc_data.setdefault("account_email", "luuthanh.quochoi@gmail.com")
+                enc_data.setdefault("auto_granted", True)
+                return enc_data
+        except Exception as exc:
+            LOGGER.debug("Khong doc duoc enc session: %s", exc)
+
+        # 3. Fallback: Doc tu Streamlit Secrets
         try:
             import streamlit as st
             if hasattr(st, "secrets"):
@@ -210,18 +222,6 @@ def load_gemini_session(config_path: Optional[Path] = None) -> Dict[str, Any]:
                             }
         except Exception:
             pass
-
-        # 3. Doc tu file ma hoa config/gemini_session.enc
-        try:
-            from core.gemini_session_sync import load_encrypted_session
-            enc_data = load_encrypted_session(ENC_CONFIG_PATH)
-            if enc_data and enc_data.get("secure_1psid"):
-                enc_data.setdefault("authuser", "0")
-                enc_data.setdefault("account_email", "luuthanh.quochoi@gmail.com")
-                enc_data.setdefault("auto_granted", True)
-                return enc_data
-        except Exception as exc:
-            LOGGER.debug("Khong doc duoc enc session: %s", exc)
 
     # 4. Fallback: bien moi truong.
     return {
@@ -273,11 +273,13 @@ def save_gemini_session(
         LOGGER.error("Khong ghi duoc file config session %s: %s", path, exc)
 
     # Dong thoi tao file ma hoa config/gemini_session.enc de dong bo len Streamlit Cloud
-    try:
-        from core.gemini_session_sync import save_encrypted_session
-        save_encrypted_session(payload, ENC_CONFIG_PATH)
-    except Exception as exc:
-        LOGGER.warning("Khong tao duoc file ma hoa enc: %s", exc)
+    # CHI luu file ma hoa that khi ghi vao duong dan mac dinh (khong bi ghi de boi unit test)
+    if config_path is None or Path(config_path) == CONFIG_PATH:
+        try:
+            from core.gemini_session_sync import save_encrypted_session
+            save_encrypted_session(payload, ENC_CONFIG_PATH)
+        except Exception as exc:
+            LOGGER.warning("Khong tao duoc file ma hoa enc: %s", exc)
 
     return ok
 
