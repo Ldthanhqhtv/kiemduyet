@@ -1,0 +1,38 @@
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pytest_cache/
+
+# Local sensitive configuration & credentials
+config/gemini_session.json
+.env
+*.lock
+
+# Local SQLite databases & temporary data
+tencentDB/*.db
+desktop/
+_deprecated/
+scratch/
+.system_generated/
+*.tmp
+*.log
+
+# Local browser profiles
+gemini_profile/
+gemini_profile_chrome/
+
+# Reference & temporary docs
+tham khao/
+*.docx
+*.bak
+*.code-workspace
+.claude/
+hd lam vi?c.txt
+"hd lam vi\341\272\271c.txt"
+
