@@ -45,7 +45,11 @@ def run_safe_async(coro: Any) -> Any:
 
 
 async def test_cookies_validity(psid: str, psidts: str = "") -> Tuple[bool, str]:
-    """Kiem tra xem cap Cookie co con hieu luc that su khong bang AccountStatus."""
+    """Kiem tra xem cap Cookie (ca __Secure-1PSID va __Secure-1PSIDTS) co con hieu luc that su khong bang AccountStatus."""
+    if not psid:
+        return False, "Thiếu Cookie __Secure-1PSID (Mã định danh tài khoản)."
+    if not psidts:
+        return False, "Thiếu Cookie __Secure-1PSIDTS (Token phiên xoay vòng)."
     try:
         from gemini_webapi import GeminiClient
         from gemini_webapi.constants import AccountStatus
@@ -56,16 +60,16 @@ async def test_cookies_validity(psid: str, psidts: str = "") -> Tuple[bool, str]
         await client.close()
 
         if status == AccountStatus.AVAILABLE:
-            return True, "Cookie hợp lệ, kết nối Gemini Web thành công!"
+            return True, "Cả 2 Cookie (__Secure-1PSID & __Secure-1PSIDTS) đều hợp lệ, kết nối Gemini Web thành công!"
         elif status == AccountStatus.UNAUTHENTICATED or status == 1016:
-            return False, "Cookie ĐÃ HẾT HẠN (UNAUTHENTICATED) - Google yêu cầu đăng nhập lại!"
+            return False, "Cặp Cookie ĐÃ HẾT HẠN (UNAUTHENTICATED / 1016) - Google yêu cầu làm mới Cookie!"
         else:
-            return False, f"Tài khoản không khả dụng (Trạng thái: {status})"
+            return False, f"Tài khoản không khả dụng (Trạng thái phản hồi: {status})"
     except Exception as exc:
         err_msg = str(exc)
         if "UNAUTHENTICATED" in err_msg or "cookie" in err_msg.lower() or "auth" in err_msg.lower():
-            return False, f"Cookie ĐÃ HẾT HẠN hoặc bị Google từ chối ({err_msg})"
-        return False, f"Lỗi xác thực: {err_msg}"
+            return False, f"Cặp Cookie ĐÃ HẾT HẠN hoặc bị Google từ chối ({err_msg})"
+        return False, f"Lỗi kết nối xác thực: {err_msg}"
 
 
 def run_capture_and_sync() -> None:
@@ -214,32 +218,48 @@ def run_capture_and_sync() -> None:
 
 
 def check_current_session() -> None:
-    """Kiem tra nhanh phien hien tai con song hay da chet."""
+    """Kiem tra nhanh ca 2 Cookie __Secure-1PSID va __Secure-1PSIDTS hien tai con song hay da chet."""
     print("=" * 70)
-    print("  🔍 KIỂM TRA HIỆU LỰC PHIÊN GEMINI WEB HIỆN TẠI")
+    print("  🔍 KIỂM TRA HIỆU LỰC CẶP COOKIE GEMINI WEB (__Secure-1PSID & __Secure-1PSIDTS)")
     print("=" * 70)
 
     from core.gemini_web_engine import load_gemini_session
 
     cfg = load_gemini_session()
-    psid = cfg.get("secure_1psid")
-    psidts = cfg.get("secure_1psidts") or ""
+    psid = (cfg.get("secure_1psid") or "").strip()
+    psidts = (cfg.get("secure_1psidts") or "").strip()
+
+    print("📋 [1/2] Đọc thông tin cặp Cookie từ cấu hình:")
+    if psid:
+        print(f"   - Cookie 1 [__Secure-1PSID]:  ✅ ĐÃ CÓ (Độ dài: {len(psid)} ký tự | Tiền tố: {psid[:15]}...)")
+    else:
+        print("   - Cookie 1 [__Secure-1PSID]:  ❌ CHƯA CÓ hoặc rỗng (Mã danh tính tài khoản thiếu!)")
+
+    if psidts:
+        print(f"   - Cookie 2 [__Secure-1PSIDTS]: ✅ ĐÃ CÓ (Độ dài: {len(psidts)} ký tự | Tiền tố: {psidts[:15]}...)")
+    else:
+        print("   - Cookie 2 [__Secure-1PSIDTS]: ❌ CHƯA CÓ hoặc rỗng (Token phiên xoay vòng thiếu!)")
 
     if not psid:
-        print("❌ Chưa có cấu hình Cookie __Secure-1PSID nào trong máy!")
+        print("\n❌ THẤT BẠI: Thiếu Cookie __Secure-1PSID bắt buộc! Hãy chạy file 'dong_bo_gemini.bat' để lấy lại.")
         return
 
-    print(f"Đang kiểm tra: 1PSID={psid[:15]}... | 1PSIDTS={psidts[:15]}...")
+    if not psidts:
+        print("\n⚠️ CẢNH BÁO: Thiếu Cookie __Secure-1PSIDTS. Google bắt buộc có cả 2 để xác thực phiên.")
+
+    print("\n🌐 [2/2] Gửi đồng thời CẢ HAI COOKIE sang máy chủ Google để xác thực...")
     is_valid, msg = run_safe_async(test_cookies_validity(psid, psidts))
 
+    print("-" * 70)
     if is_valid:
-        print(f"✅ PHIÊN HOẠT ĐỘNG TỐT: {msg}")
+        print("🎉 KẾT QUẢ: ✅ CẢ 2 COOKIE ĐỀU HỢP LỆ VÀ PHIÊN GEMINI WEB ĐANG HOẠT ĐỘNG HOÀN HẢO!")
+        print(f"   - Trạng thái: {msg}")
+        print("   - Bạn và người dùng từ xa có thể kiểm duyệt bài báo bình thường mà không cần đăng nhập lại.")
     else:
-        print("=" * 70)
-        print("  ⚠️ CẢNH BÁO NGUY HIỂM: PHIÊN GEMINI WEB ĐÃ HẾT HẠN!")
-        print(f"  Nguyên nhân: {msg}")
-        print("  👉 Vui lòng chạy file 'dong_bo_gemini.bat' để đăng nhập lại!")
-        print("=" * 70)
+        print("⚠️ KẾT QUẢ: ❌ CẶP COOKIE ĐÃ HẾT HẠN HOẶC BỊ GOOGLE TỪ CHỐI!")
+        print(f"   - Lý do chi tiết: {msg}")
+        print("   👉 Khắc phục: Hãy nhấp đúp vào file 'dong_bo_gemini.bat' trên máy tính để đăng nhập lại và tự động đồng bộ.")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
